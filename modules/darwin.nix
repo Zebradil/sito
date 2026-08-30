@@ -14,7 +14,7 @@ in
         ProgramArguments = [
           (lib.getExe' cfg.package "sito")
           "--config"
-          cfg.configFile
+          "${cfg.configFile}"
         ];
         KeepAlive = true;
         RunAtLoad = true;
