@@ -21,3 +21,8 @@ Deferred by design (see `docs/adr/`):
   once an upstream is chosen on other evidence (ADR-0002).
 - **mDNS discovery** — an early rough idea, likely never needed with a stable
   box URL plus reachability probing.
+- **Per-request log line at info level** — today request routing is only
+  visible at `sito=debug`; `/var/log/sito.log` at the default `sito=info`
+  shows startup and probe transitions but no requests. One compact info
+  line per request (path, chosen upstream, status, ms) would make the
+  production log useful without debug noise.
