@@ -3,41 +3,71 @@
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
+/// Every key is kebab-case in TOML (`probe-interval-secs`) and unknown keys
+/// are a parse error, so a typo fails loudly at startup instead of silently
+/// taking a default.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Config {
+    /// `host:port` to bind. Default `127.0.0.1:5001` — localhost only,
+    /// because sito performs no authentication and grants its clients
+    /// whatever the upstreams grant it.
     #[serde(default = "default_listen")]
     pub listen: String,
+    /// Seconds between probe passes. Default 15; it bounds how long a stale
+    /// health verdict can survive after the machine changes networks
+    /// (ADR-0004).
     #[serde(default = "default_probe_interval")]
     pub probe_interval_secs: u64,
+    /// Per-probe deadline in seconds, connect through response. Default 3: an
+    /// upstream that cannot answer `/nix-cache-info` inside it counts as down
+    /// for this pass.
     #[serde(default = "default_probe_timeout")]
     pub probe_timeout_secs: u64,
+    /// Hard cap on concurrently served requests. Default 64. The cap is
+    /// backpressure, not rejection — see [`crate::proxy::serve`].
     #[serde(default = "default_max_inflight")]
     pub max_inflight: usize,
+    /// Tiers in the order they are tried. Written as repeated `[[tier]]`
+    /// tables, each holding repeated `[[tier.upstream]]` tables. Defaults to
+    /// empty, which [`Config::parse`] then rejects.
     #[serde(default, rename = "tier")]
     pub tiers: Vec<Tier>,
 }
 
+/// An ordered group of upstreams sharing one selection strategy. Tiers are
+/// tried in order and the first tier that produces a hit wins, so the tier is
+/// the unit of policy: "my own caches first, the public one only on miss".
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Tier {
     #[serde(default)]
     pub strategy: Strategy,
+    /// Upstreams in config order, which is also the tie-break order used
+    /// before any quality signal exists.
     #[serde(default, rename = "upstream")]
     pub upstreams: Vec<Upstream>,
 }
 
+/// How a tier queries its upstreams for one request. `race` is parsed but
+/// rejected by [`Config::parse`]: the schema carries it from day one so
+/// adding it later is not a breaking config change (ADR-0003).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Strategy {
+    /// Try upstreams one at a time in current rank order; the first hit wins,
+    /// a 404 moves on to the next. The only strategy v1 implements.
     #[default]
     Sequential,
+    /// Reserved: parallel fan-out, first positive answer wins. Unimplemented.
     Race,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Upstream {
+    /// Base URL of the binary cache, `http://` or `https://`. A trailing
+    /// slash is tolerated; request paths are appended to it verbatim.
     pub url: String,
     /// Signing keys the client must trust for this upstream. sito never
     /// verifies signatures itself (pass-through trust); the field exists so
@@ -61,12 +91,19 @@ fn default_max_inflight() -> usize {
 }
 
 impl Config {
+    /// Read and parse a TOML config file. Errors if the file is unreadable or
+    /// fails [`Config::parse`].
     pub fn load(path: &std::path::Path) -> Result<Self> {
         let raw =
             std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
         Self::parse(&raw).with_context(|| format!("parse {}", path.display()))
     }
 
+    /// Parse TOML and reject configs that would leave sito with nothing
+    /// useful to do or with a promise it cannot keep: no upstreams anywhere,
+    /// a tier asking for [`Strategy::Race`], or an upstream URL that is not
+    /// `http://` or `https://`. Validation happens once at startup — config
+    /// reload is restart-only (ADR-0005).
     pub fn parse(raw: &str) -> Result<Self> {
         let cfg: Config = toml::from_str(raw)?;
         if cfg.tiers.iter().all(|t| t.upstreams.is_empty()) {

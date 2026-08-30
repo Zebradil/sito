@@ -8,6 +8,9 @@ use std::time::{Duration, Instant};
 
 use crate::state::Registry;
 
+/// Handle to the running probe thread. Holding one does not keep the thread
+/// alive and dropping one does not stop it; the only thing it can do is ask
+/// for an early pass.
 pub struct Prober {
     kick: SyncSender<()>,
 }
@@ -20,6 +23,18 @@ impl Prober {
     }
 }
 
+/// Start the probe loop on its own detached thread: one pass immediately, so
+/// health is settled before the first request, then a pass every `interval`
+/// or sooner if [`Prober::kick`] fires. The thread never exits and is not
+/// joined — the process outlives it by construction.
+///
+/// `timeout` is the whole per-probe budget, connect through response; an
+/// upstream that overruns it counts as down for that pass. Probes run on
+/// their own agent so this deadline cannot leak onto request traffic.
+///
+/// # Panics
+///
+/// If the thread cannot be spawned. A sito that cannot probe cannot route.
 pub fn spawn(registry: Arc<Registry>, interval: Duration, timeout: Duration) -> Prober {
     let (tx, rx): (SyncSender<()>, Receiver<()>) = sync_channel(1);
     std::thread::Builder::new()
@@ -39,6 +54,14 @@ pub fn spawn(registry: Arc<Registry>, interval: Duration, timeout: Duration) -> 
     Prober { kick: tx }
 }
 
+/// One pass over every upstream, sequentially. Reachable means a 2xx on
+/// `/nix-cache-info` within the timeout: ureq reports any other status as an
+/// error, so a host that answers 404 there is not a usable binary cache and
+/// is treated as down.
+///
+/// Passes are frequent and mostly boring, so the info-level line fires only
+/// when a verdict actually flips; steady state stays silent and a network
+/// change shows up as a handful of lines.
 fn probe_all(agent: &ureq::Agent, registry: &Registry) {
     for u in registry.snapshot() {
         let url = format!("{}/nix-cache-info", u.url.trim_end_matches('/'));
