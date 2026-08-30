@@ -21,6 +21,11 @@ in
         EnvironmentVariables = {
           RUST_LOG = cfg.logLevel;
         };
+        # Without these launchd drops stderr, and every tracing line —
+        # including the upstream-failure warnings sito exists to surface —
+        # is lost. journald covers the NixOS module; only darwin needs this.
+        StandardOutPath = "/var/log/sito.log";
+        StandardErrorPath = "/var/log/sito.log";
       };
     };
   };
