@@ -26,3 +26,7 @@ Deferred by design (see `docs/adr/`):
   shows startup and probe transitions but no requests. One compact info
   line per request (path, chosen upstream, status, ms) would make the
   production log useful without debug noise.
+- **Auth-gated upstreams** — private caches (Cachix, Attic, FlakeHub,
+  nix-serve behind Basic) are read as down today, since sito sends no
+  credentials. Read the machine's `netrc` via a `netrc-file` key when built
+  (ADR-0008).
