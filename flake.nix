@@ -37,6 +37,16 @@
         };
     in
     {
+      nixosModules = {
+        sito = import ./modules/nixos.nix { inherit self; };
+        default = self.nixosModules.sito;
+      };
+
+      darwinModules = {
+        sito = import ./modules/darwin.nix { inherit self; };
+        default = self.darwinModules.sito;
+      };
+
       packages = forAllSystems (
         { system, pkgs }:
         {
