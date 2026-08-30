@@ -61,7 +61,7 @@
       );
 
       checks = forAllSystems (
-        { system, pkgs }:
+        { system, ... }:
         {
           # cargo test runs in the package's checkPhase.
           build = self.packages.${system}.sito;
