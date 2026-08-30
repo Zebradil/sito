@@ -223,19 +223,22 @@ fn forward(app: &App, req: Request, kind: RequestKind) {
 /// and get buffered so the `URL:` field can seed NAR affinity — the bytes
 /// sent are still exactly the bytes received (pass-through trust, ADR-0006).
 ///
-/// Only `Content-Type` and `Content-Length` are carried over; upstream
-/// caching, CORS and vendor headers are dropped, since the client is a Nix
-/// daemon on localhost that reads neither.
+/// The upstream's status code is mirrored, and only `Content-Type` and
+/// `Content-Length` are carried over; upstream caching, CORS and vendor
+/// headers are dropped, since the client is a Nix daemon on localhost that
+/// reads neither. No client request headers travel the other way, so an
+/// upstream never sees a `Range` or `If-None-Match` it could answer 206 or
+/// 304 to.
 ///
-/// A HEAD always answers 200 with those headers and no body, whatever the
-/// upstream's own status line said, because reaching here already means the
-/// upstream produced a response rather than a 404.
+/// A HEAD answers with those headers and no body.
 ///
 /// NAR bodies stream through a [`MeteredReader`]; with no upstream
-/// `Content-Length` the response falls back to chunked encoding. Narinfo
-/// bodies are read with a 1 MiB cap — a narinfo larger than that is
-/// truncated silently rather than rejected, so the client sees a malformed
-/// narinfo and rejects it itself. Real ones are well under a kilobyte.
+/// `Content-Length` tiny_http falls back to chunked encoding on its own.
+/// Narinfo bodies are buffered with a 1 MiB cap, and the length sito
+/// advertises is the buffer's own — forwarding the upstream's would leave a
+/// client waiting on bytes a truncated body never sends. A narinfo past the
+/// cap is therefore served short and rejected by the client as malformed;
+/// real ones are well under a kilobyte.
 fn relay(
     app: &App,
     req: Request,
@@ -245,14 +248,16 @@ fn relay(
     head: bool,
     start: Instant,
 ) {
-    let mut headers = Vec::new();
-    for name in ["Content-Type", "Content-Length"] {
-        if let Some(v) = upstream.headers().get(name)
-            && let Ok(v) = v.to_str()
-        {
-            headers.push(header(name, v));
-        }
-    }
+    let status = tiny_http::StatusCode(upstream.status().as_u16());
+    // Content-Type only: the length sito sends depends on what it sends, and
+    // for a buffered narinfo that is not the upstream's number.
+    let headers: Vec<Header> = upstream
+        .headers()
+        .get("Content-Type")
+        .and_then(|v| v.to_str().ok())
+        .map(|v| header("Content-Type", v))
+        .into_iter()
+        .collect();
     let len: Option<usize> = upstream
         .headers()
         .get("Content-Length")
@@ -260,9 +265,12 @@ fn relay(
         .and_then(|v| v.parse().ok());
 
     if head {
-        let mut resp = Response::empty(200);
+        let mut resp = Response::empty(status);
         for h in headers {
             resp.add_header(h);
+        }
+        if let Some(n) = len {
+            resp.add_header(header("Content-Length", &n.to_string()));
         }
         return respond(req, resp);
     }
@@ -282,7 +290,7 @@ fn relay(
             if let Some(nar_path) = narinfo_url_field(&body) {
                 app.registry.set_affinity(nar_path, idx);
             }
-            let mut resp = Response::from_data(body);
+            let mut resp = Response::from_data(body).with_status_code(status);
             for h in headers {
                 resp.add_header(h);
             }
@@ -297,12 +305,7 @@ fn relay(
                 bytes: 0,
                 eof: false,
             };
-            let mut resp = Response::new(200.into(), headers, reader, len, None);
-            if len.is_none() {
-                // Unknown length: tiny_http falls back to chunked encoding.
-                resp = resp.with_chunked_threshold(1);
-            }
-            respond(req, resp);
+            respond(req, Response::new(status, headers, reader, len, None));
         }
     }
 }

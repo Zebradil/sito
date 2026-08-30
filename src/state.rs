@@ -57,10 +57,10 @@ pub struct UpstreamSnapshot {
     /// signal, since it measures the request shape clients actually wait on.
     /// `None` until this upstream has served a narinfo.
     pub narinfo_ms: Option<f64>,
-    /// EWMA of NAR download throughput, in **megabytes** per second
-    /// (bytes / 1e6 / seconds) despite the name. Recorded only for transfers
-    /// that ran to completion; `None` until one has.
-    pub nar_mbps: Option<f64>,
+    /// EWMA of NAR download throughput, in megabytes per second
+    /// (bytes / 1e6 / seconds). Recorded only for transfers that ran to
+    /// completion; `None` until one has.
+    pub nar_mbytes_per_sec: Option<f64>,
     /// Requests this upstream answered with a body: every narinfo hit and
     /// every NAR hit.
     pub hits: u64,
@@ -107,7 +107,7 @@ impl Registry {
                     healthy: None,
                     probe_ms: None,
                     narinfo_ms: None,
-                    nar_mbps: None,
+                    nar_mbytes_per_sec: None,
                     hits: 0,
                     misses: 0,
                     errors: 0,
@@ -163,11 +163,13 @@ impl Registry {
         });
     }
 
-    /// Fold a completed NAR transfer into the throughput EWMA. `mbps` is
-    /// megabytes per second (bytes / 1e6 / seconds), measured over the whole
+    /// Fold a completed NAR transfer into the throughput EWMA. `mbytes_per_sec`
+    /// is megabytes per second (bytes / 1e6 / seconds), measured over the whole
     /// body. Hit counting is separate: this is only the speed signal.
-    pub fn record_nar_throughput(&self, index: usize, mbps: f64) {
-        self.with(index, |u| u.nar_mbps = Some(ewma(u.nar_mbps, mbps)));
+    pub fn record_nar_throughput(&self, index: usize, mbytes_per_sec: f64) {
+        self.with(index, |u| {
+            u.nar_mbytes_per_sec = Some(ewma(u.nar_mbytes_per_sec, mbytes_per_sec))
+        });
     }
 
     /// A served response with no timing worth keeping — NAR hits, whose speed

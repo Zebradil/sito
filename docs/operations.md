@@ -94,9 +94,13 @@ Watch for `upstream state changed … up=true`.
 
 **An upstream that needs authentication is always `healthy: false`.**
 The probe treats any non-2xx answer to `GET /nix-cache-info` as unreachable,
-401/403 included, and a down upstream is skipped entirely — so there is no way
-back for a cache that is up but always rejects an unauthenticated probe. sito
-sends no credentials; such caches are not supported today.
+401/403 included, and a down upstream is skipped entirely. That verdict is
+correct — sito sends no credentials, so every request to such a cache would
+fail too — but it is not obvious from `healthy: false` alone. The transition
+log line carries the reason, so
+`upstream state changed … up=false reason="http status: 401"` distinguishes a
+cache that wants credentials from one that is unreachable. Authenticated
+caches are not supported today.
 
 **Everything 404s.**
 Check `misses` in `/status`. If misses are climbing, sito is reaching the

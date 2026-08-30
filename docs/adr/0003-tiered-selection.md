@@ -9,9 +9,13 @@ plus a `strategy` field (`sequential` | `race`).
 v1 implements only `sequential`: within a tier, upstreams are tried by current
 rank, skipping upstreams the probe marks down; a hit wins, a miss moves on; when
 every tier misses, sito answers 404 and Nix proceeds (next substituter or local
-build). The NAR is fetched from the upstream whose narinfo answered — narinfo
-URLs are relative to their cache, so cross-upstream NAR retry is not attempted
-in v1.
+build). A NAR is tried first at the upstream whose narinfo answered, because
+narinfo `URL:` fields are relative to their own cache; that affinity is a
+preference, not a pin, so if the remembered upstream 404s or fails the walk
+carries on through the tiers. Caches that share the content-addressed
+`nar/<filehash>` layout will have the path or 404 cheaply, and a body from the
+wrong file fails the client's own NAR hash check, so the extra attempts cost
+nothing but a round trip.
 
 `race` stays in the schema but unimplemented until wanted: parallel fan-out
 against upstreams someone else pays for (cache.nixos.org) is rude, and rank

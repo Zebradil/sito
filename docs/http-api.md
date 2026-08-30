@@ -48,27 +48,29 @@ If the plan is exhausted (or was empty because every upstream is marked down),
 sito answers `404 no upstream has this path` and Nix falls through to its next
 substituter or a local build.
 
-Response headers are **not** passed through wholesale: only `Content-Type` and
-`Content-Length` are copied. The body is byte-identical to the upstream's
-(pass-through trust, [ADR-0006](adr/0006-pass-through-trust.md)) — signature
-verification stays in the Nix client.
+The upstream's status code is mirrored. Response headers are **not** passed
+through wholesale: only `Content-Type` and `Content-Length` are copied, and the
+length sito sends is always the length of what sito sends. The body is
+byte-identical to the upstream's (pass-through trust,
+[ADR-0006](adr/0006-pass-through-trust.md)) — signature verification stays in
+the Nix client.
 
-`HEAD` requests are forwarded as `HEAD` and answered `200` with the copied
-headers and no body.
+`HEAD` requests are forwarded as `HEAD` and answered with the copied headers
+and no body.
 
-Client request headers are **not** forwarded upstream, and sito always answers
-`200` on a hit rather than mirroring the upstream's status. `Range`,
-`If-None-Match` and friends are therefore ignored — the Nix daemon uses none of
-them, but anything else pointed at sito should know.
+Client request headers are **not** forwarded upstream. `Range`, `If-None-Match`
+and friends are therefore ignored, and an upstream never has occasion to answer
+`206` or `304` — the Nix daemon sends none of them, but anything else pointed
+at sito should know.
 
 Narinfo bodies are read into memory with a 1 MiB cap so the `URL:` field can be
 parsed and remembered as **NAR affinity** — the next request for that NAR path
-goes straight to the upstream whose narinfo named it. A narinfo larger than
-1 MiB would be truncated while the upstream's `Content-Length` is still
-forwarded, so the client would wait for bytes that never arrive; real narinfos
-are well under a kilobyte. NAR bodies
-are never buffered: they stream through a metering reader that records
-throughput once the transfer completes.
+is tried against the upstream whose narinfo named it first, falling through to
+the normal tier walk if that upstream no longer has it. A narinfo larger than
+1 MiB is served truncated, with the truncated length, so the client rejects a
+malformed narinfo instead of waiting on bytes that never arrive; real narinfos
+are well under a kilobyte. NAR bodies are never buffered: they stream through a
+metering reader that records throughput once the transfer completes.
 
 A failure while reading a narinfo body from the upstream (after the response
 headers already arrived) answers `502 upstream read failed` — no other upstream
@@ -95,7 +97,7 @@ $ curl -s localhost:5001/status | jq
       "healthy": true,
       "probe_ms": 1.8,
       "narinfo_ms": 3.2,
-      "nar_mbps": 84.5,
+      "nar_mbytes_per_sec": 84.5,
       "hits": 191,
       "misses": 12,
       "errors": 0
@@ -107,7 +109,7 @@ $ curl -s localhost:5001/status | jq
       "healthy": true,
       "probe_ms": 41.6,
       "narinfo_ms": null,
-      "nar_mbps": null,
+      "nar_mbytes_per_sec": null,
       "hits": 0,
       "misses": 0,
       "errors": 0
@@ -134,7 +136,7 @@ $ curl -s localhost:5001/status | jq
 | `healthy`    | bool \| null  | `null` until the first probe answers (cold start). `true` after a successful probe, `false` after a failed probe **or** any transport error on a real request. `false` means the upstream is skipped entirely by the selection engine until a probe brings it back. |
 | `probe_ms`   | float \| null | EWMA of `GET /nix-cache-info` round-trip time, milliseconds. `null` until the first successful probe. Failed probes do not contribute a sample — they only flip `healthy`. |
 | `narinfo_ms` | float \| null | EWMA of narinfo request latency measured on real traffic, milliseconds. `null` until this upstream has served a narinfo. This is the **primary ranking key** within a tier; `probe_ms` is the fallback. |
-| `nar_mbps`   | float \| null | EWMA of NAR download throughput. Despite the name this is **megabytes per second** (`bytes / 1e6 / seconds`), not megabits. `null` until a NAR transfer completes; aborted transfers contribute nothing. Currently informational — the built-in engine does not rank on it. |
+| `nar_mbytes_per_sec` | float \| null | EWMA of NAR download throughput, in **megabytes per second** (`bytes / 1e6 / seconds`). `null` until a NAR transfer completes; aborted transfers contribute nothing. Currently informational — the built-in engine does not rank on it. |
 | `hits`       | int           | Successful (2xx) upstream responses served through this upstream, narinfo and NAR alike.                                                      |
 | `misses`     | int           | 404s from this upstream — it simply does not have the path. Normal and expected for a small LAN cache in front of a big one.                  |
 | `errors`     | int           | Transport failures (connection refused, timeout, TLS, …). Each one also sets `healthy` to `false` and kicks an immediate probe pass. A rising `errors` count with `healthy: true` means the upstream is flapping. |

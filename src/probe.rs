@@ -61,23 +61,32 @@ pub fn spawn(registry: Arc<Registry>, interval: Duration, timeout: Duration) -> 
 ///
 /// Passes are frequent and mostly boring, so the info-level line fires only
 /// when a verdict actually flips; steady state stays silent and a network
-/// change shows up as a handful of lines.
+/// change shows up as a handful of lines. That line carries the failure
+/// reason, because "down" alone does not distinguish a cache that is
+/// unreachable from one that is up and answering 401 — the latter is not
+/// usable by sito either, which sends no credentials, but it needs a
+/// different fix.
 fn probe_all(agent: &ureq::Agent, registry: &Registry) {
     for u in registry.snapshot() {
         let url = format!("{}/nix-cache-info", u.url.trim_end_matches('/'));
         let start = Instant::now();
-        let result = match agent.get(&url).call() {
-            Ok(_) => Some(start.elapsed().as_secs_f64() * 1000.0),
+        let (result, reason) = match agent.get(&url).call() {
+            Ok(_) => (Some(start.elapsed().as_secs_f64() * 1000.0), None),
             Err(e) => {
                 tracing::debug!(url, error = %e, "probe failed");
-                None
+                (None, Some(e.to_string()))
             }
         };
         let came_up = result.is_some() && u.healthy != Some(true);
         let went_down = result.is_none() && u.healthy != Some(false);
         registry.record_probe(u.index, result);
         if came_up || went_down {
-            tracing::info!(url = u.url, up = result.is_some(), "upstream state changed");
+            tracing::info!(
+                url = u.url,
+                up = result.is_some(),
+                reason = reason.unwrap_or_default(),
+                "upstream state changed"
+            );
         }
     }
 }
