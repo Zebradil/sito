@@ -1,25 +1,5 @@
 {
   "nodes": {
-    "kasha": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1788053892,
-        "narHash": "sha256-VriQpfNbtOtsGausTAxztSGfyZUe7wAByRgSsDHR95E=",
-        "owner": "zebradil",
-        "repo": "kasha",
-        "rev": "92957ade7fea4cf193b2c3ee25a480f8e8fc9e90",
-        "type": "github"
-      },
-      "original": {
-        "owner": "zebradil",
-        "repo": "kasha",
-        "type": "github"
-      }
-    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1787874478,
@@ -38,7 +18,6 @@
     },
     "root": {
       "inputs": {
-        "kasha": "kasha",
         "nixpkgs": "nixpkgs"
       }
     }

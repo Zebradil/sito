@@ -136,7 +136,8 @@ $ nix develop                     # cargo, clippy, rustfmt, rust-analyzer
 $ cargo test                      # unit tests plus the end-to-end suite
 $ cargo clippy --all-targets --all-features -- -D warnings
 $ cargo fmt --all
-$ nix build -L                    # what CI builds; runs the tests again
+$ nix flake check -L              # what CI's build job builds: fmt, clippy,
+                                   # and the package (cargo test again, in checkPhase)
 ```
 
 `tests/e2e.rs` starts real mock upstreams and a real sito on ephemeral ports —
