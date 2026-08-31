@@ -9,6 +9,11 @@
     'renovate[bot]@users.noreply.github.com',
     'github-actions[bot]@users.noreply.github.com',
   ],
+  // flake.lock pins the kasha rev CI runs the cache-push script from; without
+  // the nix manager nothing would ever bump it.
+  nix: {
+    enabled: true,
+  },
   packageRules: [
     // Enable automerging for non-major updates to all dependencies
     {

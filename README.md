@@ -110,11 +110,32 @@ sito's own `listen` address and trusts every `public-keys` entry found across
 `settings.tier` (see [ADR 0007](docs/adr/0007-nix-modules.md)). Full option
 reference: [docs/configuration.md](docs/configuration.md#nix-module-options).
 
+## Prebuilt sito
+
+CI builds `checks.x86_64-linux.*` and `checks.aarch64-darwin.*` on every push
+to `main` and publishes the output closures to kasha's remote cache, signed
+with kasha's CI key. Pull requests read that cache but never write to it, so a
+client that trusts the key substitutes sito instead of compiling it:
+
+```nix
+nix.settings = {
+  substituters = [ "https://znix.zebradil.dev" ];
+  trusted-public-keys = [ "kasha-ci-1:KNW/sz+Zz800U/IFZ38vH5rvlHtM3Fb0Q/wmDJquG+U=" ];
+};
+```
+
+Retention is kasha's: the push emits a generation manifest under `nsito/`,
+one per system, and kasha's GC decides how long it lives. The `kasha` flake
+input exists only to pin the rev of the push script and manifest emitter CI
+runs — no sito output depends on it.
+
 ## Relation to kasha
 
 sito is a sibling of [kasha](https://github.com/Zebradil/kasha) — the LAN
-cache box it was designed around — but neither depends on the other: sito
-proxies any HTTP binary caches, kasha serves fine without sito.
+cache box it was designed around — but neither runtime depends on the other:
+sito proxies any HTTP binary caches, kasha serves fine without sito. The only
+link is at build time, above: sito's CI publishes into kasha's cache with
+kasha's push tooling.
 
 ## License
 

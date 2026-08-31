@@ -3,8 +3,15 @@
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
+  # Unused by the outputs: CI reads the locked rev out of flake.lock and runs
+  # kasha's `kasha-cache-push` and `kasha emit` from it. Pinning here is what
+  # keeps the push script and the manifest format it writes in step
+  # (kasha ADR-0009), and lets renovate bump both at once.
+  inputs.kasha.url = "github:zebradil/kasha";
+  inputs.kasha.inputs.nixpkgs.follows = "nixpkgs";
+
   outputs =
-    { self, nixpkgs }:
+    { self, nixpkgs, ... }:
     let
       inherit (nixpkgs) lib;
       systems = [

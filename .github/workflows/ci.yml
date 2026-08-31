@@ -10,10 +10,25 @@ permissions:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-latest
+          - system: aarch64-darwin
+            runner: macos-26
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41 # main
+        with:
+          # kasha's cache, read side. Plain public HTTPS reads, so this works
+          # for fork pull requests too — `vars` are exposed to them, unlike
+          # `secrets`.
+          extra-conf: |
+            extra-substituters = ${{ vars.KASHA_CACHE_URL }}
+            extra-trusted-public-keys = ${{ vars.KASHA_CI_PUBLIC_KEY }}
 
       - run: nix develop -c cargo fmt --all -- --check
       - run: nix develop -c cargo clippy --all-targets --all-features -- -D warnings
@@ -22,3 +37,52 @@ jobs:
       # Also exercises the flake package build (rustPlatform.buildRustPackage
       # runs cargo test again in its checkPhase).
       - run: nix build -L
+
+      # Push only from main: the write credentials and the signing key stay off
+      # branch builds, and main already primes the cache for the next PR.
+      # A broken cache must slow CI down, never fail it.
+      - name: Publish check outputs
+        if: github.event_name == 'push'
+        continue-on-error: true
+        env:
+          CACHE_S3_URL: ${{ secrets.KASHA_REMOTE }}
+          KASHA_CI_SIGNING_KEY: ${{ secrets.KASHA_CI_SIGNING_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.KASHA_CI_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.KASHA_CI_SECRET_ACCESS_KEY }}
+          KASHA_FLAKE: sito
+          KASHA_BRANCH: ${{ github.ref_name }}
+          # Retention groups by (flake, branch, attr), and each system pushes a
+          # disjoint closure, so the two matrix jobs must not share a group —
+          # or the newer one would evict the other platform's generations.
+          KASHA_ATTR: checks-${{ matrix.system }}
+          SYSTEM: ${{ matrix.system }}
+        run: |
+          set -euo pipefail
+
+          # The push script and the `kasha emit` it drives come from the rev
+          # pinned in flake.lock, not from kasha's main.
+          kasha="github:zebradil/kasha/$(jq -r '.nodes.kasha.locked.rev' flake.lock)"
+
+          # Output closures only. The script's attr mode would push each check's
+          # *build* closure — every nixpkgs input, tens of GB that cache.nixos.org
+          # already serves. What CI needs back is the outputs themselves.
+          attrs=()
+          # `nix eval --raw` emits no trailing newline, so a plain `read` loop
+          # silently drops the last attribute.
+          while IFS= read -r a || [ -n "$a" ]; do
+            [ -n "$a" ] && attrs+=(".#checks.${SYSTEM}.${a}")
+          done < <(
+            nix eval --raw ".#checks.${SYSTEM}" \
+              --apply 'cs: builtins.concatStringsSep "\n" (builtins.attrNames cs)'
+          )
+          nix build --no-link --print-out-paths "${attrs[@]}" \
+            | xargs nix-store --query --requisites \
+            | sort -u > "$RUNNER_TEMP/paths.txt"
+
+          umask 077
+          printf '%s' "$KASHA_CI_SIGNING_KEY" > "$RUNNER_TEMP/kasha-ci.key"
+
+          CACHE_SIGNING_KEY_FILE="$RUNNER_TEMP/kasha-ci.key" \
+          KASHA_BIN="$(nix build --no-link --print-out-paths "${kasha}#kasha")/bin/kasha" \
+          KASHA_GEN="${GITHUB_REF_NAME}-${GITHUB_SHA::12}-${SYSTEM}" \
+            nix run "${kasha}#kasha-cache-push" -- --paths-file "$RUNNER_TEMP/paths.txt"
