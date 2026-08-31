@@ -22,13 +22,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: zebradil/nix-ci/.github/actions/setup-nix@v1
+      - uses: zebradil/nix-ci/.github/actions/setup-nix@v0.1.0
         with:
-          # kasha's cache, read side. Plain public HTTPS reads, so this works
+          # Binary cache, read side. Plain public HTTPS reads, so this works
           # for fork pull requests too — `vars` are exposed to them, unlike
           # `secrets`.
-          extra-substituters: ${{ vars.KASHA_CACHE_URL }}
-          extra-trusted-public-keys: ${{ vars.KASHA_CI_PUBLIC_KEY }}
+          extra-substituters: ${{ vars.NIX_CACHE_URL }}
+          extra-trusted-public-keys: ${{ vars.NIX_CACHE_PUBLIC_KEY }}
 
       # cargo fmt/clippy live as checks.<system>.{fmt,clippy} and cargo test
       # runs in the package's checkPhase (checks.<system>.build), so the build
@@ -49,22 +49,22 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: zebradil/nix-ci/.github/actions/setup-nix@v1
+      - uses: zebradil/nix-ci/.github/actions/setup-nix@v0.1.0
         with:
-          extra-substituters: ${{ vars.KASHA_CACHE_URL }}
-          extra-trusted-public-keys: ${{ vars.KASHA_CI_PUBLIC_KEY }}
+          extra-substituters: ${{ vars.NIX_CACHE_URL }}
+          extra-trusted-public-keys: ${{ vars.NIX_CACHE_PUBLIC_KEY }}
           # Push only from main: the write credentials and the signing key
           # stay off branch builds, and main already primes the cache for the
           # next PR.
-          signing-key: ${{ github.event_name == 'push' && secrets.KASHA_CI_SIGNING_KEY || '' }}
+          signing-key: ${{ github.event_name == 'push' && secrets.CACHE_SIGNING_KEY || '' }}
 
       - id: build
-        uses: zebradil/nix-ci/.github/actions/build@v1
+        uses: zebradil/nix-ci/.github/actions/build@v0.1.0
         with:
           attr: checks.${{ matrix.system }}
-          cache-s3-url: ${{ github.event_name == 'push' && secrets.KASHA_REMOTE || '' }}
-          aws-access-key-id: ${{ secrets.KASHA_CI_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.KASHA_CI_SECRET_ACCESS_KEY }}
+          cache-s3-url: ${{ github.event_name == 'push' && secrets.CACHE_S3_URL || '' }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       # A NAR sitting in the cache with no manifest is invisible to kasha's
       # mirror-down and never marked live by GC, so this is what actually
@@ -73,7 +73,7 @@ jobs:
       - name: Publish kasha manifest
         if: github.event_name == 'push'
         continue-on-error: true
-        uses: zebradil/kasha/.github/actions/emit-manifest@v1
+        uses: zebradil/kasha/.github/actions/emit-manifest@v0.1.0
         with:
           flake: sito
           paths-file: ${{ steps.build.outputs.paths-file }}
@@ -81,6 +81,6 @@ jobs:
           # a disjoint closure, so the two matrix jobs must not share a group
           # — or the newer one would evict the other platform's generations.
           attr: checks-${{ matrix.system }}
-          s3-url: ${{ secrets.KASHA_REMOTE }}
-          aws-access-key-id: ${{ secrets.KASHA_CI_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.KASHA_CI_SECRET_ACCESS_KEY }}
+          s3-url: ${{ secrets.CACHE_S3_URL }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
