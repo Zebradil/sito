@@ -66,34 +66,6 @@ jobs:
           aws-access-key-id: ${{ secrets.KASHA_CI_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.KASHA_CI_SECRET_ACCESS_KEY }}
 
-      # nix-fast-build (attr-set strategy) streams its uploads and reports no
-      # single closure — build.outputs.paths-file is empty here, it's only
-      # populated for uncached-leaves — so resolve what got pushed ourselves.
-      # Substitutes instantly: everything was just built or was already
-      # cached.
-      - name: Resolve pushed closure
-        if: github.event_name == 'push'
-        id: paths
-        run: |
-          set -euo pipefail
-
-          # Output closures only, not each check's *build* closure — that's
-          # every nixpkgs input, tens of GB that cache.nixos.org already
-          # serves. What the manifest needs back is the outputs themselves.
-          attrs=()
-          # `nix eval --raw` emits no trailing newline, so a plain `read` loop
-          # would silently drop the last attribute.
-          while IFS= read -r a || [ -n "$a" ]; do
-            [ -n "$a" ] && attrs+=(".#checks.${{ matrix.system }}.${a}")
-          done < <(
-            nix eval --raw ".#checks.${{ matrix.system }}" \
-              --apply 'cs: builtins.concatStringsSep "\n" (builtins.attrNames cs)'
-          )
-          nix build --no-link --print-out-paths "${attrs[@]}" \
-            | xargs nix-store --query --requisites \
-            | sort -u > "$RUNNER_TEMP/paths.txt"
-          echo "file=$RUNNER_TEMP/paths.txt" >> "$GITHUB_OUTPUT"
-
       # A NAR sitting in the cache with no manifest is invisible to kasha's
       # mirror-down and never marked live by GC, so this is what actually
       # makes the push above count. Best-effort like the push itself: a
@@ -104,7 +76,7 @@ jobs:
         uses: zebradil/kasha/.github/actions/emit-manifest@v1
         with:
           flake: sito
-          paths-file: ${{ steps.paths.outputs.file }}
+          paths-file: ${{ steps.build.outputs.paths-file }}
           # Retention groups by (flake, branch, attr), and each system pushes
           # a disjoint closure, so the two matrix jobs must not share a group
           # — or the newer one would evict the other platform's generations.
