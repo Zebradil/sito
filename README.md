@@ -110,11 +110,34 @@ sito's own `listen` address and trusts every `public-keys` entry found across
 `settings.tier` (see [ADR 0007](docs/adr/0007-nix-modules.md)). Full option
 reference: [docs/configuration.md](docs/configuration.md#nix-module-options).
 
+## CI
+
+[zebradil/nix-ci](https://github.com/zebradil/nix-ci) provides the workflow:
+`nix flake check --no-build` up front, then `checks.<system>.*` — `build`
+(the package, which runs `cargo test` in its own checkPhase), `fmt`
+(`cargo fmt --check`), `clippy` — built and pushed to kasha's remote cache on
+every push to `main`. Pull requests read that cache but never write to it, so
+a client that trusts the key substitutes sito instead of compiling it:
+
+```nix
+nix.settings = {
+  substituters = [ "https://znix.zebradil.dev" ];
+  trusted-public-keys = [ "kasha-ci-1:KNW/sz+Zz800U/IFZ38vH5rvlHtM3Fb0Q/wmDJquG+U=" ];
+};
+```
+
+Retention is kasha's: after the push, CI calls kasha's `emit-manifest` action
+to file a generation manifest under `roots/sito/`, one per system — a push
+with no manifest is invisible to kasha's retention and gets garbage
+collected on the next sweep. See `.github/workflows/ci.yml`.
+
 ## Relation to kasha
 
 sito is a sibling of [kasha](https://github.com/Zebradil/kasha) — the LAN
-cache box it was designed around — but neither depends on the other: sito
-proxies any HTTP binary caches, kasha serves fine without sito.
+cache box it was designed around — but neither runtime depends on the other:
+sito proxies any HTTP binary caches, kasha serves fine without sito. The only
+link is at build time, above: sito's CI publishes into kasha's cache and
+manifests it with kasha's own actions.
 
 ## License
 

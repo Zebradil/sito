@@ -1,5 +1,14 @@
 name: CI
 
+# Not a call to zebradil/nix-ci's reusable ci.yaml: that wrapper builds with
+# nix-fast-build (attr-set strategy) and never forwards what it pushed, but
+# sito needs the pushed closure's path list to hand kasha a generation
+# manifest — without one the push is invisible to kasha's retention (see
+# kasha's mark-sweep GC: an unmanifested object is never in any generation's
+# mark set, so it is deleted on the next sweep past its 24h grace window).
+# So this calls nix-ci's actions directly and adds the manifest step the
+# wrapper can't express.
+
 on:
   push:
     branches: [main]
@@ -13,12 +22,65 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41 # main
+      - uses: zebradil/nix-ci/.github/actions/setup-nix@v1.0.0
+        with:
+          # Binary cache, read side. Plain public HTTPS reads, so this works
+          # for fork pull requests too — `vars` are exposed to them, unlike
+          # `secrets`.
+          extra-substituters: ${{ vars.NIX_CACHE_URL }}
+          extra-trusted-public-keys: ${{ vars.NIX_CACHE_PUBLIC_KEY }}
 
-      - run: nix develop -c cargo fmt --all -- --check
-      - run: nix develop -c cargo clippy --all-targets --all-features -- -D warnings
-      - run: nix develop -c cargo test
+      # cargo fmt/clippy live as checks.<system>.{fmt,clippy} and cargo test
+      # runs in the package's checkPhase (checks.<system>.build), so the build
+      # job below covers all three; --no-build here only proves the flake
+      # still evaluates, on a system the build matrix might not cover.
+      - run: nix flake check --no-build
 
-      # Also exercises the flake package build (rustPlatform.buildRustPackage
-      # runs cargo test again in its checkPhase).
-      - run: nix build -L
+  build:
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-latest
+          - system: aarch64-darwin
+            runner: macos-26
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: zebradil/nix-ci/.github/actions/setup-nix@v1.0.0
+        with:
+          extra-substituters: ${{ vars.NIX_CACHE_URL }}
+          extra-trusted-public-keys: ${{ vars.NIX_CACHE_PUBLIC_KEY }}
+          # Push only from main: the write credentials and the signing key
+          # stay off branch builds, and main already primes the cache for the
+          # next PR.
+          signing-key: ${{ github.event_name == 'push' && secrets.CACHE_SIGNING_KEY || '' }}
+
+      - id: build
+        uses: zebradil/nix-ci/.github/actions/build@v1.0.0
+        with:
+          attr: checks.${{ matrix.system }}
+          cache-s3-url: ${{ github.event_name == 'push' && secrets.CACHE_S3_URL || '' }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      # A NAR sitting in the cache with no manifest is invisible to kasha's
+      # mirror-down and never marked live by GC, so this is what actually
+      # makes the push above count. Best-effort like the push itself: a
+      # broken cache must slow CI down, never fail it.
+      - name: Publish kasha manifest
+        if: github.event_name == 'push'
+        continue-on-error: true
+        uses: zebradil/kasha/.github/actions/emit-manifest@v0.1.0
+        with:
+          flake: sito
+          paths-file: ${{ steps.build.outputs.paths-file }}
+          # Retention groups by (flake, branch, attr), and each system pushes
+          # a disjoint closure, so the two matrix jobs must not share a group
+          # — or the newer one would evict the other platform's generations.
+          attr: checks-${{ matrix.system }}
+          s3-url: ${{ secrets.CACHE_S3_URL }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
