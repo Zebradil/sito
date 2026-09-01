@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: zebradil/nix-ci/.github/actions/setup-nix@v0.1.0
+      - uses: zebradil/nix-ci/.github/actions/setup-nix@v1.0.0
         with:
           # Binary cache, read side. Plain public HTTPS reads, so this works
           # for fork pull requests too — `vars` are exposed to them, unlike
@@ -49,7 +49,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: zebradil/nix-ci/.github/actions/setup-nix@v0.1.0
+      - uses: zebradil/nix-ci/.github/actions/setup-nix@v1.0.0
         with:
           extra-substituters: ${{ vars.NIX_CACHE_URL }}
           extra-trusted-public-keys: ${{ vars.NIX_CACHE_PUBLIC_KEY }}
@@ -59,7 +59,7 @@ jobs:
           signing-key: ${{ github.event_name == 'push' && secrets.CACHE_SIGNING_KEY || '' }}
 
       - id: build
-        uses: zebradil/nix-ci/.github/actions/build@v0.1.0
+        uses: zebradil/nix-ci/.github/actions/build@v1.0.0
         with:
           attr: checks.${{ matrix.system }}
           cache-s3-url: ${{ github.event_name == 'push' && secrets.CACHE_S3_URL || '' }}
