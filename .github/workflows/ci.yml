@@ -73,7 +73,7 @@ jobs:
       - name: Publish kasha manifest
         if: github.event_name == 'push'
         continue-on-error: true
-        uses: zebradil/kasha/.github/actions/emit-manifest@v0.1.0
+        uses: zebradil/kasha/.github/actions/emit-manifest@9ab46e8fd222817954444ba6de8b9cee99f07503 # v0.2.0
         with:
           flake: sito
           paths-file: ${{ steps.build.outputs.paths-file }}
