@@ -62,7 +62,7 @@ jobs:
         uses: zebradil/nix-ci/.github/actions/build@v1.0.2
         with:
           attr: checks.${{ matrix.system }}
-          cache-s3-url: ${{ github.event_name == 'push' && secrets.CACHE_S3_URL || '' }}
+          cache-s3-url: ${{ github.event_name == 'push' && vars.CACHE_S3_URL || '' }}
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
@@ -81,6 +81,6 @@ jobs:
           # a disjoint closure, so the two matrix jobs must not share a group
           # — or the newer one would evict the other platform's generations.
           attr: checks-${{ matrix.system }}
-          s3-url: ${{ secrets.CACHE_S3_URL }}
+          s3-url: ${{ vars.CACHE_S3_URL }}
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
