@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: zebradil/nix-ci/.github/actions/setup-nix@v1.1.0
+      - uses: zebradil/nix-ci/.github/actions/setup-nix@97a2729c1f60ab655cff974c9e861916e9b03712 # v1.1.0
         with:
           # Binary cache, read side. Plain public HTTPS reads, so this works
           # for fork pull requests too — `vars` are exposed to them, unlike
@@ -49,7 +49,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: zebradil/nix-ci/.github/actions/setup-nix@v1.1.0
+      - uses: zebradil/nix-ci/.github/actions/setup-nix@97a2729c1f60ab655cff974c9e861916e9b03712 # v1.1.0
         with:
           extra-substituters: ${{ vars.NIX_CACHE_URL }}
           extra-trusted-public-keys: ${{ vars.NIX_CACHE_PUBLIC_KEY }}
@@ -59,7 +59,7 @@ jobs:
           signing-key: ${{ github.event_name == 'push' && secrets.CACHE_SIGNING_KEY || '' }}
 
       - id: build
-        uses: zebradil/nix-ci/.github/actions/build@v1.1.0
+        uses: zebradil/nix-ci/.github/actions/build@97a2729c1f60ab655cff974c9e861916e9b03712 # v1.1.0
         with:
           attr: checks.${{ matrix.system }}
           cache-s3-url: ${{ github.event_name == 'push' && vars.CACHE_S3_URL || '' }}
@@ -73,7 +73,7 @@ jobs:
       - name: Publish kasha manifest
         if: github.event_name == 'push'
         continue-on-error: true
-        uses: zebradil/kasha/.github/actions/emit-manifest@9ab46e8fd222817954444ba6de8b9cee99f07503 # v0.2.0
+        uses: zebradil/kasha/.github/actions/emit-manifest@c7dbb587a49c2a4dfc4fb3552bf54b0da84d6296 # v0.3.0
         with:
           flake: sito
           paths-file: ${{ steps.build.outputs.paths-file }}
