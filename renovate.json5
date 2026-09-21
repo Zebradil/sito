@@ -13,11 +13,6 @@
     'github-actions[bot]@users.noreply.github.com',
   ],
   packageRules: [
-    // Enable automerging for non-major updates to all dependencies
-    {
-      automerge: true,
-      matchUpdateTypes: ["minor", "patch", "pin", "digest"],
-    },
     // Group PRs for GitHub Action updates into a single PR
     {
       description: "Group GitHub Action updates into a single PR",
