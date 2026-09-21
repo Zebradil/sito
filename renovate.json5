@@ -5,6 +5,9 @@
     'helpers:pinGitHubActionDigestsToSemver',
     'schedule:nonOfficeHours',
   ],
+  // Machine-readable update classes for pr-autopilot. prHeader, not prBodyNotes: notes are
+  // compiled per upgrade, so the upgrades loop would render an empty list there.
+  prHeader: '<!-- pr-autopilot:upgrades [{{#each upgrades}}{"depName":"{{{depName}}}","updateType":"{{{updateType}}}","currentValue":"{{{currentValue}}}","newValue":"{{{newValue}}}"}{{#unless @last}},{{/unless}}{{/each}}] -->',
   gitIgnoredAuthors: [
     'renovate[bot]@users.noreply.github.com',
     'github-actions[bot]@users.noreply.github.com',
