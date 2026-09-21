@@ -23,7 +23,7 @@ jobs:
   sweep:
     runs-on: ubuntu-slim
     steps:
-      - uses: Zebradil/pr-autopilot@v1.0.1
+      - uses: Zebradil/pr-autopilot@v1.0.2
         with:
           dry-run: ${{ inputs.dry_run }}
           # Set the PR_AUTOPILOT_CLIENT_ID variable to act as a GitHub App (the documented identity), or leave it
