@@ -1,0 +1,37 @@
+enabled = true
+
+# Documentation only — the engine never reads this table (ADR 0012). It records what onboarding
+# concluded about the repository, and why the policy below looks the way it does.
+#
+# release_mode: no tags, no release tooling; the version in Cargo.toml is bumped by hand.
+# deploys_from_main: a push to main builds and pushes the closure to the binary cache, nothing
+#   more. Hosts consume sito through a pinned flake.lock and are bumped deliberately.
+# test_confidence: PR CI builds on x86_64-linux and aarch64-darwin, runs clippy -D warnings,
+#   unit tests, and end-to-end tests that drive real HTTP through tiny_http and ureq mock
+#   upstreams. A behaviour change in the HTTP, TOML or serde crates fails the build.
+#   Blind spot: the kasha emit-manifest step runs only on push and is continue-on-error, so a
+#   kasha action bump cannot fail PR CI and breaks silently after merge.
+[risk]
+release_mode      = "none"
+deploys_from_main = false
+test_confidence   = "high"
+criticality       = "normal"
+
+# The only thing the engine consults. Values are verdicts; an update class that is absent here
+# escalates.
+[policy]
+patch    = "merge"
+minor    = "merge"
+major    = "escalate"
+digest   = "merge"
+pin      = "merge"
+lockfile = "merge"
+
+[limits]
+max_merges    = 10   # merges per sweep
+max_repairs   = 3    # agent dispatches per sweep
+attempt_cap   = 2    # repair attempts per pull request, then escalate for good
+lease_minutes = 30   # how long one sweep's claim on a pull request lasts
+
+[repair]
+strategy = "bot-branch"   # bot-branch | side-pr
