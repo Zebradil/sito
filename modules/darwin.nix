@@ -10,12 +10,15 @@ in
 
   config = lib.mkIf cfg.enable {
     launchd.daemons.sito = {
+      # `command` (not ProgramArguments) makes nix-darwin prefix
+      # `wait4path /nix/store`: at boot launchd can spawn the daemon before
+      # the Nix volume is mounted, fail with EX_CONFIG, and never retry.
+      command = lib.escapeShellArgs [
+        (lib.getExe' cfg.package "sito")
+        "--config"
+        "${cfg.configFile}"
+      ];
       serviceConfig = {
-        ProgramArguments = [
-          (lib.getExe' cfg.package "sito")
-          "--config"
-          "${cfg.configFile}"
-        ];
         KeepAlive = true;
         RunAtLoad = true;
         EnvironmentVariables = {
