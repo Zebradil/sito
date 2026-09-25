@@ -14,6 +14,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  id-token: write
 
 concurrency:
   group: pr-autopilot-${{ github.repository }}
@@ -23,11 +24,13 @@ jobs:
   sweep:
     runs-on: ubuntu-slim
     steps:
-      - uses: Zebradil/pr-autopilot@84c10134158b323ba96af44419b41a8c0fe09bc5 # v1.2.0
+      - uses: octo-sts/action@f603d3be9d8dd9871a265776e625a27b00effe05 # v1.1.1
+        id: sts
+        with:
+          domain: sts.zebradil.dev
+          scope: ${{ github.repository_owner }}
+          identity: pr-autopilot
+      - uses: Zebradil/pr-autopilot@4bcc29c03641a86a6bee67f9cb8c999d7ca4df5d # v1.4.0
         with:
           dry-run: ${{ inputs.dry_run }}
-          # Set the PR_AUTOPILOT_CLIENT_ID variable to act as a GitHub App (the documented identity), or leave it
-          # unset to fall back to the PR_AUTOPILOT_TOKEN secret. See docs/manual.md, "Identity".
-          client-id: ${{ vars.PR_AUTOPILOT_CLIENT_ID }}
-          app-private-key: ${{ secrets.PR_AUTOPILOT_APP_PRIVATE_KEY }}
-          token: ${{ secrets.PR_AUTOPILOT_TOKEN }}
+          token: ${{ steps.sts.outputs.token }}
