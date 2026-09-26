@@ -76,23 +76,18 @@ strategy = "sequential"
         {
           services.sito = {
             enable = true;
-            settings = {
-              listen = "127.0.0.1:5001";
-              tier = [
-                {
-                  strategy = "sequential";
-                  upstream = [
-                    { url = "http://box.lan:5000"; public-keys = [ "znix.zebradil.dev:AAAA..." ]; }
-                    { url = "https://znix.zebradil.dev"; public-keys = [ "znix.zebradil.dev:AAAA..." ]; }
-                  ];
-                }
-                {
-                  strategy = "sequential";
-                  upstream = [
-                    { url = "https://cache.nixos.org"; public-keys = [ "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=" ]; }
-                  ];
-                }
-              ];
+            tiers = {
+              lan = {
+                priority = 10;
+                upstreams = {
+                  box = { url = "http://box.lan:5000"; public-keys = [ "znix.zebradil.dev:AAAA..." ]; };
+                  remote = { url = "https://znix.zebradil.dev"; public-keys = [ "znix.zebradil.dev:AAAA..." ]; };
+                };
+              };
+              public.upstreams.nixos = {
+                url = "https://cache.nixos.org";
+                public-keys = [ "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=" ];
+              };
             };
           };
         }
@@ -102,12 +97,17 @@ strategy = "sequential"
 }
 ```
 
-`darwinModules.default` mirrors this for nix-darwin. `services.sito.settings` is
-the TOML config above as a Nix attrset — every field the binary understands is
-expressible, with no separate option per knob. With the default
+`darwinModules.default` mirrors this for nix-darwin. `services.sito.tiers`
+renders into the config's `[[tier]]` list, sorted by `priority` (default 1000,
+ties broken by name; upstreams within a tier likewise). Because tiers and
+upstreams are named, another module can add to an existing tier —
+`services.sito.tiers.lan.upstreams.work.url = "http://work.example:5000";` —
+which a raw list cannot do. Every other field goes in `services.sito.settings`,
+the TOML config above as a Nix attrset; `settings.tier` still works but is
+mutually exclusive with `tiers`. With the default
 `manageSubstituters = true`, the module points `nix.settings.substituters` at
 sito's own `listen` address and trusts every `public-keys` entry found across
-`settings.tier` (see [ADR 0007](docs/adr/0007-nix-modules.md)). Full option
+the tiers (see [ADR 0007](docs/adr/0007-nix-modules.md)). Full option
 reference: [docs/configuration.md](docs/configuration.md#nix-module-options).
 
 ## CI

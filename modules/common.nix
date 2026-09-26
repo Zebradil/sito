@@ -8,16 +8,49 @@ let
   cfg = config.services.sito;
   settingsFormat = pkgs.formats.toml { };
 
+  # Named entries sorted into the binary's ordered lists: priority first, the
+  # attribute name breaking ties so the order never depends on definition order.
+  byPriority =
+    attrs:
+    map (name: attrs.${name}) (
+      lib.sort
+        (
+          a: b:
+          attrs.${a}.priority < attrs.${b}.priority
+          || (attrs.${a}.priority == attrs.${b}.priority && a < b)
+        )
+        (lib.attrNames attrs)
+    );
+
+  renderedTiers = map
+    (
+      tier:
+      lib.optionalAttrs (tier.strategy != null) { inherit (tier) strategy; }
+      // {
+        upstream = map (upstream: { inherit (upstream) url public-keys; }) (byPriority tier.upstreams);
+      }
+    )
+    (byPriority cfg.tiers);
+
+  effectiveSettings =
+    cfg.settings // lib.optionalAttrs (cfg.tiers != { }) { tier = renderedTiers; };
+
   # Every upstream's public-keys, across every tier, flattened and deduped —
   # the file already carries these (pass-through trust, ADR "language"), so
   # the module reuses them instead of asking for a second copy.
   allPublicKeys = lib.unique (
     lib.flatten (
       map (tier: map (upstream: upstream.public-keys or [ ]) (tier.upstream or [ ])) (
-        cfg.settings.tier or [ ]
+        effectiveSettings.tier or [ ]
       )
     )
   );
+
+  priorityOption = lib.mkOption {
+    type = lib.types.int;
+    default = 1000;
+    description = "Sort key; lower comes first. Ties fall back to the attribute name.";
+  };
 
   # Mirrors the binary's own serde default (src/config.rs): the module
   # doesn't need `settings` to carry `listen` for the daemon to work, only to
@@ -67,6 +100,58 @@ in
       };
     };
 
+    tiers = lib.mkOption {
+      type = lib.types.attrsOf (
+        lib.types.submodule {
+          options = {
+            priority = priorityOption;
+            strategy = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "Tier strategy; null leaves it to the binary's default (`sequential`).";
+            };
+            upstreams = lib.mkOption {
+              type = lib.types.attrsOf (
+                lib.types.submodule {
+                  options = {
+                    priority = priorityOption;
+                    url = lib.mkOption {
+                      type = lib.types.str;
+                      description = "Base URL of the binary cache.";
+                    };
+                    public-keys = lib.mkOption {
+                      type = lib.types.listOf lib.types.str;
+                      default = [ ];
+                      description = "Signing keys this upstream's narinfos carry.";
+                    };
+                  };
+                }
+              );
+              default = { };
+              description = "Upstreams in this tier, keyed by name.";
+            };
+          };
+        }
+      );
+      default = { };
+      description = ''
+        Tiers keyed by name, rendered into `settings.tier` sorted by
+        `priority`. Unlike the raw list, named tiers and upstreams merge
+        across modules, so a host can add an upstream to a tier another
+        module defines. Mutually exclusive with `settings.tier`.
+      '';
+      example = {
+        lan = {
+          priority = 10;
+          upstreams.box.url = "http://box.lan:5000";
+        };
+        public.upstreams.nixos = {
+          url = "https://cache.nixos.org";
+          public-keys = [ "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=" ];
+        };
+      };
+    };
+
     manageSubstituters = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -106,7 +191,14 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    services.sito.configFile = settingsFormat.generate "sito.toml" cfg.settings;
+    assertions = [
+      {
+        assertion = cfg.tiers == { } || !(cfg.settings ? tier);
+        message = "services.sito: set either `tiers` or `settings.tier`, not both.";
+      }
+    ];
+
+    services.sito.configFile = settingsFormat.generate "sito.toml" effectiveSettings;
 
     nix.settings = lib.mkIf cfg.manageSubstituters {
       substituters = [ "http://${listenAddr}" ] ++ cfg.extraFallbackSubstituters;
