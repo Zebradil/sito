@@ -30,17 +30,23 @@ let
       { services.sito.tiers.lan.upstreams.work.url = "http://work.example:5000"; }
     ];
   };
-  toml = lib.importTOML eval.config.services.sito.configFile;
-  urls = map (tier: map (upstream: upstream.url) tier.upstream) toml.tier;
-  expected = [
-    [
-      "http://box.lan:5000"
-      "http://work.example:5000"
-      "https://remote.example"
-    ]
-    [ "https://cache.nixos.org" ]
-  ];
+  # Compared as files at build time: reading configFile during eval would be
+  # import-from-derivation, which `nix flake check --no-build` rejects.
+  expected = (pkgs.formats.toml { }).generate "expected.toml" {
+    tier = [
+      {
+        upstream = [
+          { url = "http://box.lan:5000"; public-keys = [ ]; }
+          { url = "http://work.example:5000"; public-keys = [ ]; }
+          { url = "https://remote.example"; public-keys = [ "remote-1:AAAA" ]; }
+        ];
+      }
+      { upstream = [{ url = "https://cache.nixos.org"; public-keys = [ ]; }]; }
+    ];
+  };
 in
-assert lib.assertMsg (urls == expected) "tiers rendered as ${builtins.toJSON urls}";
 assert eval.config.nix.settings.trusted-public-keys == [ "remote-1:AAAA" ];
-pkgs.runCommand "sito-module-tiers" { } "touch $out"
+pkgs.runCommand "sito-module-tiers" { } ''
+  diff -u ${expected} ${eval.config.services.sito.configFile}
+  touch $out
+''
