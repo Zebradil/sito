@@ -124,6 +124,16 @@ instant, and Nix falls through to the next substituter or a local build. Slow
 failure instead points at sito being *up* and one of its upstreams being a
 black hole — check `probe-timeout-secs` and the `upstream failed` warnings.
 
+**A NAR download is slow or fails partway.**
+`sito.log` says which upstream and how far it got, at the default log level:
+
+- `slow NAR transfer` — completed, but took 30 s or more at under 1 MB/s.
+- `NAR upstream read failed` — the upstream broke off or sent nothing for
+  60 s. The upstream is marked down and counted in `errors`; the client gets a
+  short body and Nix fails that path (it cannot resume through sito).
+- `NAR transfer abandoned by client` — Nix hung up first; not the upstream's
+  fault, nothing is recorded.
+
 **Large builds stall at high concurrency.**
 `max-inflight` (default 64) bounds concurrent transfers, and a slot is held for
 a whole NAR download. Raise it if `nix build -j` with many parallel downloads

@@ -10,7 +10,8 @@ use crate::state::Registry;
 
 /// Handle to the running probe thread. Holding one does not keep the thread
 /// alive and dropping one does not stop it; the only thing it can do is ask
-/// for an early pass.
+/// for an early pass. Clones share the one probe thread.
+#[derive(Clone)]
 pub struct Prober {
     kick: SyncSender<()>,
 }

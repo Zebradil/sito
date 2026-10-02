@@ -91,9 +91,8 @@ pub fn serve(app: Arc<App>, server: Server, max_inflight: usize) -> Result<()> {
 /// and `/nar/*` are forwarded to upstreams. Everything else is 404.
 ///
 /// Status codes sito emits on its own behalf: 404 for an unrecognised path,
-/// 404 when every upstream in the plan missed, 405 for anything but GET or
-/// HEAD (sito is read-only, ADR-0002), and 502 when a narinfo body could not
-/// be read from the upstream that promised it.
+/// 404 when every upstream in the plan missed or failed, and 405 for anything
+/// but GET or HEAD (sito is read-only, ADR-0002).
 fn handle(app: &App, req: Request) {
     let method = req.method().clone();
     let path = req.url().to_string();
@@ -159,15 +158,11 @@ fn selection_input(app: &App, kind: RequestKind, path: &str) -> SelectionInput {
     }
 }
 
-/// Walk the selection plan until an upstream answers, then hand off to
-/// [`relay`].
+/// Walk the selection plan until an upstream answers, then send its response.
 ///
-/// Each attempt ends one of three ways: a response, which is recorded as a
-/// hit and relayed (the walk stops there — no second upstream is consulted);
-/// a 404, which is a miss, costs the upstream nothing but the counter, and
-/// moves on; or a transport error, which counts an error, marks the upstream
-/// down, kicks the prober so recovery does not wait for the interval, and
-/// moves on.
+/// Each attempt ends one of three ways (see [`attempt`]): a hit, which is
+/// sent and stops the walk — no second upstream is consulted; a miss, which
+/// moves on; or a failure, which also moves on.
 ///
 /// An exhausted plan — including an empty one, when every upstream is down —
 /// is a 404. That is the correct answer for Nix: it moves to the next
@@ -180,77 +175,86 @@ fn forward(app: &App, req: Request, kind: RequestKind) {
     tracing::debug!(path, ?attempts, "plan");
 
     for idx in attempts {
-        let base = app.registry.url(idx);
-        let url = format!("{}{}", base.trim_end_matches('/'), path);
-        let agent = match kind {
-            RequestKind::Narinfo => &app.info_agent,
-            RequestKind::Nar => &app.nar_agent,
-        };
-        let start = Instant::now();
-        let call = if head {
-            agent.head(&url).call()
-        } else {
-            agent.get(&url).call()
-        };
-        match call {
-            Ok(upstream_resp) => {
-                match kind {
-                    RequestKind::Narinfo => {
-                        app.registry
-                            .record_narinfo_hit(idx, start.elapsed().as_secs_f64() * 1000.0);
-                    }
-                    RequestKind::Nar => app.registry.record_hit(idx),
-                }
-                tracing::debug!(url, upstream = base, "hit");
-                return relay(app, req, upstream_resp, idx, kind, head, start);
-            }
-            Err(ureq::Error::StatusCode(404)) => {
-                app.registry.record_miss(idx);
-                continue;
-            }
-            Err(e) => {
-                tracing::warn!(url, error = %e, "upstream failed");
-                app.registry.record_error(idx);
-                app.prober.kick();
-                continue;
-            }
+        if let Attempt::Hit(resp) = attempt(app, idx, &path, kind, head) {
+            return respond(req, resp);
         }
     }
     respond(req, text(404, "no upstream has this path"));
 }
 
-/// Stream an upstream response through unmodified. Narinfo bodies are tiny
-/// and get buffered so the `URL:` field can seed NAR affinity — the bytes
-/// sent are still exactly the bytes received (pass-through trust, ADR-0006).
+/// How one upstream answered one request.
+enum Attempt {
+    /// A response ready to send. For a GET the body is already known to be
+    /// flowing: the narinfo is read whole, and the NAR's first chunk is in.
+    Hit(Response<Box<dyn Read + Send>>),
+    /// The upstream answered 404: it does not have this path. Costs the
+    /// upstream nothing but the counter.
+    Miss,
+    /// A transport error, a non-404 error status, or a body that failed
+    /// before its first byte. Counts an error, marks the upstream down and
+    /// kicks the prober so recovery does not wait for the interval.
+    Failed,
+}
+
+/// Fetch `path` from upstream `idx` and turn the answer into a response for
+/// the client, recording what happened in the registry.
 ///
-/// The upstream's status code is mirrored, and only `Content-Type` and
-/// `Content-Length` are carried over; upstream caching, CORS and vendor
-/// headers are dropped, since the client is a Nix daemon on localhost that
-/// reads neither. No client request headers travel the other way, so an
-/// upstream never sees a `Range` or `If-None-Match` it could answer 206 or
-/// 304 to.
+/// Nothing reaches the client until the body has started, which is what lets
+/// a body that fails early — an upstream that sends headers and then stalls
+/// until the idle timeout — fall through to the next upstream instead of
+/// becoming a broken 200. Once NAR bytes have been sent there is no switching
+/// upstreams; see [`MeteredReader`] for how a later failure is surfaced.
 ///
-/// A HEAD answers with those headers and no body.
+/// The upstream's status code is mirrored, and only `Content-Type` is carried
+/// over; upstream caching, CORS and vendor headers are dropped, since the
+/// client is a Nix daemon on localhost that reads neither. No client request
+/// headers travel the other way, so an upstream never sees a `Range` or
+/// `If-None-Match` it could answer 206 or 304 to.
 ///
-/// NAR bodies stream through a [`MeteredReader`]; with no upstream
-/// `Content-Length` tiny_http falls back to chunked encoding on its own.
-/// Narinfo bodies are buffered with a 1 MiB cap, and the length sito
-/// advertises is the buffer's own — forwarding the upstream's would leave a
-/// client waiting on bytes a truncated body never sends. A narinfo past the
-/// cap is therefore served short and rejected by the client as malformed;
-/// real ones are well under a kilobyte.
-fn relay(
-    app: &App,
-    req: Request,
-    mut upstream: ureq::http::Response<ureq::Body>,
-    idx: usize,
-    kind: RequestKind,
-    head: bool,
-    start: Instant,
-) {
+/// - **HEAD** answers with those headers plus the upstream's
+///   `Content-Length`, and no body.
+/// - **Narinfo** bodies are buffered whole, with a 1 MiB cap, so the `URL:`
+///   field can seed NAR affinity — the bytes sent are still exactly the bytes
+///   received (pass-through trust, ADR-0006). The length sito advertises is
+///   the buffer's own, since forwarding the upstream's would leave a client
+///   waiting on bytes a truncated body never sends; a narinfo past the cap is
+///   served short and rejected by the client as malformed. Real ones are well
+///   under a kilobyte.
+/// - **NAR** bodies stream through a [`MeteredReader`], always chunked: no
+///   `Content-Length` is sent, even when the upstream gave one. tiny_http
+///   cannot close a client connection mid-response, so with a fixed length a
+///   failed upstream would leave Nix waiting for the missing bytes until its
+///   own `stalled-download-timeout`. A chunked body instead ends at once, and
+///   Nix rejects the short NAR straight away.
+fn attempt(app: &App, idx: usize, path: &str, kind: RequestKind, head: bool) -> Attempt {
+    let base = app.registry.url(idx);
+    let url = format!("{}{}", base.trim_end_matches('/'), path);
+    let agent = match kind {
+        RequestKind::Narinfo => &app.info_agent,
+        RequestKind::Nar => &app.nar_agent,
+    };
+    let start = Instant::now();
+    let call = if head {
+        agent.head(&url).call()
+    } else {
+        agent.get(&url).call()
+    };
+    let upstream = match call {
+        Ok(r) => r,
+        Err(ureq::Error::StatusCode(404)) => {
+            app.registry.record_miss(idx);
+            return Attempt::Miss;
+        }
+        Err(e) => {
+            tracing::warn!(url, error = %e, "upstream failed");
+            app.registry.record_error(idx);
+            app.prober.kick();
+            return Attempt::Failed;
+        }
+    };
+    let headers_ms = start.elapsed().as_secs_f64() * 1000.0;
+
     let status = tiny_http::StatusCode(upstream.status().as_u16());
-    // Content-Type only: the length sito sends depends on what it sends, and
-    // for a buffered narinfo that is not the upstream's number.
     let headers: Vec<Header> = upstream
         .headers()
         .get("Content-Type")
@@ -264,50 +268,59 @@ fn relay(
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.parse().ok());
 
-    if head {
-        let mut resp = Response::empty(status);
-        for h in headers {
-            resp.add_header(h);
+    let (body, len): (Box<dyn Read + Send>, _) = if head {
+        (Box::new(std::io::empty()), len)
+    } else {
+        match kind {
+            RequestKind::Narinfo => {
+                let mut body = Vec::new();
+                if let Err(e) = upstream
+                    .into_body()
+                    .into_reader()
+                    .take(1 << 20)
+                    .read_to_end(&mut body)
+                {
+                    tracing::warn!(url, error = %e, "narinfo body read failed");
+                    app.registry.record_error(idx);
+                    app.prober.kick();
+                    return Attempt::Failed;
+                }
+                if let Some(nar_path) = narinfo_url_field(&body) {
+                    app.registry.set_affinity(nar_path, idx);
+                }
+                let n = body.len();
+                (Box::new(std::io::Cursor::new(body)), Some(n))
+            }
+            RequestKind::Nar => {
+                let mut reader = MeteredReader {
+                    inner: upstream.into_body().into_reader(),
+                    registry: app.registry.clone(),
+                    prober: app.prober.clone(),
+                    idx,
+                    url: url.clone(),
+                    start,
+                    bytes: 0,
+                    eof: false,
+                    failed: false,
+                };
+                let mut first = vec![0; 64 * 1024];
+                let n = reader.read(&mut first).unwrap_or(0);
+                if reader.failed {
+                    // Already recorded and logged by the reader.
+                    return Attempt::Failed;
+                }
+                first.truncate(n);
+                (Box::new(std::io::Cursor::new(first).chain(reader)), None)
+            }
         }
-        if let Some(n) = len {
-            resp.add_header(header("Content-Length", &n.to_string()));
-        }
-        return respond(req, resp);
-    }
+    };
 
     match kind {
-        RequestKind::Narinfo => {
-            let mut body = Vec::new();
-            if let Err(e) = upstream
-                .body_mut()
-                .as_reader()
-                .take(1 << 20)
-                .read_to_end(&mut body)
-            {
-                tracing::warn!(error = %e, "narinfo body read failed");
-                return respond(req, text(502, "upstream read failed"));
-            }
-            if let Some(nar_path) = narinfo_url_field(&body) {
-                app.registry.set_affinity(nar_path, idx);
-            }
-            let mut resp = Response::from_data(body).with_status_code(status);
-            for h in headers {
-                resp.add_header(h);
-            }
-            respond(req, resp);
-        }
-        RequestKind::Nar => {
-            let reader = MeteredReader {
-                inner: upstream.into_body().into_reader(),
-                registry: app.registry.clone(),
-                idx,
-                start,
-                bytes: 0,
-                eof: false,
-            };
-            respond(req, Response::new(status, headers, reader, len, None));
-        }
+        RequestKind::Narinfo => app.registry.record_narinfo_hit(idx, headers_ms),
+        RequestKind::Nar => app.registry.record_hit(idx),
     }
+    tracing::debug!(url, upstream = base, "hit");
+    Attempt::Hit(Response::new(status, headers, body, len, None))
 }
 
 /// Extract the `URL:` field (the NAR path a client will fetch next) from a
@@ -319,34 +332,80 @@ fn narinfo_url_field(body: &[u8]) -> Option<String> {
         .map(|v| v.trim().to_string())
 }
 
-/// Counts NAR bytes on the way through and records throughput once the body
-/// completes; aborted transfers record nothing.
+/// Below this throughput a completed NAR transfer that took at least
+/// [`SLOW_NAR_MIN_SECS`] is logged as slow. Small NARs are dominated by
+/// latency, hence the duration floor.
+const SLOW_NAR_MBYTES_PER_SEC: f64 = 1.0;
+const SLOW_NAR_MIN_SECS: f64 = 30.0;
+
+/// Counts NAR bytes on the way through, records throughput once the body
+/// completes, and reports how a transfer ended when it did not end well.
 ///
-/// The measurement is taken on drop, because that is the only point at which
-/// the transfer is known to be over. Requiring `eof` before recording is what
-/// keeps the number honest: a client that disconnects mid-NAR leaves elapsed
-/// time counting bytes that were never sent, which would read as a slow
-/// upstream and demote a perfectly good one. Elapsed time is measured from
-/// the request start, so connect and header latency are charged to
-/// throughput too — deliberate, since that is what the transfer actually
-/// cost.
+/// A transfer ends one of three ways, told apart on drop:
+///
+/// - **EOF** — the body completed. Throughput feeds the EWMA, and a transfer
+///   that was long and slow is logged as a warning.
+/// - **Upstream read error** — including the idle timeout. Counted as an
+///   upstream error and the upstream is marked down and the prober kicked,
+///   exactly like a failed request: an upstream that stalls mid-body is as
+///   broken as one that refuses connections. Logged at warn. The client gets
+///   a short body; Nix cannot resume it (sito sends no `Accept-Ranges`) and
+///   rejects the truncated NAR.
+/// - **Neither** — the client hung up first (Nix cancels downloads it no
+///   longer needs). Not the upstream's fault, so nothing is recorded; logged
+///   at info.
+///
+/// Requiring `eof` before recording throughput is what keeps the number
+/// honest: a client that disconnects mid-NAR leaves elapsed time counting
+/// bytes that were never sent, which would read as a slow upstream and demote
+/// a perfectly good one. Elapsed time is measured from the request start, so
+/// connect and header latency are charged to throughput too — deliberate,
+/// since that is what the transfer actually cost.
 struct MeteredReader {
     inner: ureq::BodyReader<'static>,
     registry: Arc<Registry>,
+    prober: Prober,
     idx: usize,
+    url: String,
     start: Instant,
     bytes: u64,
     eof: bool,
+    failed: bool,
 }
 
 impl Read for MeteredReader {
+    /// An upstream error is recorded and then reported to the caller as end
+    /// of body, never as an error. The NAR goes out chunked, and tiny_http
+    /// flushes the terminating chunk only when the body ends without an
+    /// error, so passing the error on would leave the client waiting for
+    /// bytes until its own stall timeout.
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let n = self.inner.read(buf)?;
-        self.bytes += n as u64;
-        if n == 0 {
-            self.eof = true;
+        if self.failed {
+            return Ok(0);
         }
-        Ok(n)
+        match self.inner.read(buf) {
+            Ok(0) => {
+                self.eof = true;
+                Ok(0)
+            }
+            Ok(n) => {
+                self.bytes += n as u64;
+                Ok(n)
+            }
+            Err(e) => {
+                self.failed = true;
+                tracing::warn!(
+                    url = self.url,
+                    bytes = self.bytes,
+                    secs = self.start.elapsed().as_secs(),
+                    error = %e,
+                    "NAR upstream read failed"
+                );
+                self.registry.record_error(self.idx);
+                self.prober.kick();
+                Ok(0)
+            }
+        }
     }
 }
 
@@ -354,8 +413,24 @@ impl Drop for MeteredReader {
     fn drop(&mut self) {
         let secs = self.start.elapsed().as_secs_f64();
         if self.eof && secs > 0.0 && self.bytes > 0 {
-            self.registry
-                .record_nar_throughput(self.idx, self.bytes as f64 / 1e6 / secs);
+            let rate = self.bytes as f64 / 1e6 / secs;
+            self.registry.record_nar_throughput(self.idx, rate);
+            if secs >= SLOW_NAR_MIN_SECS && rate < SLOW_NAR_MBYTES_PER_SEC {
+                tracing::warn!(
+                    url = self.url,
+                    bytes = self.bytes,
+                    secs = secs as u64,
+                    mbytes_per_sec = format!("{rate:.2}"),
+                    "slow NAR transfer"
+                );
+            }
+        } else if !self.eof && !self.failed {
+            tracing::info!(
+                url = self.url,
+                bytes = self.bytes,
+                secs = secs as u64,
+                "NAR transfer abandoned by client"
+            );
         }
     }
 }

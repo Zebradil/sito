@@ -136,3 +136,65 @@ fn nar_affinity_prefers_the_upstream_that_served_the_narinfo() {
     let status: serde_json::Value = serde_json::from_slice(&status).unwrap();
     assert_eq!(status["affinity_entries"], 1);
 }
+
+/// Mock upstream at the raw socket level: answers `/nix-cache-info` properly
+/// and every other request with `reply`, then closes the connection — a
+/// `Content-Length` larger than `reply` makes that a truncated body.
+fn raw_upstream(reply: &'static [u8]) -> String {
+    use std::io::Write;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        for mut conn in listener.incoming().flatten() {
+            let mut buf = [0; 4096];
+            let n = conn.read(&mut buf).unwrap_or(0);
+            let out: &[u8] = if buf[..n].starts_with(b"GET /nix-cache-info ") {
+                b"HTTP/1.1 200 OK\r\nContent-Length: 21\r\nConnection: close\r\n\r\nStoreDir: /nix/store\n"
+            } else {
+                reply
+            };
+            let _ = conn.write_all(out);
+        }
+    });
+    format!("http://{addr}")
+}
+
+fn status_of(base: &str) -> serde_json::Value {
+    let (_, body) = get(&format!("{base}/status")).unwrap();
+    serde_json::from_slice(&body).unwrap()
+}
+
+#[test]
+fn nar_body_failure_ends_the_response_and_counts_as_error() {
+    // Bytes already sent cannot be taken back: the client must get a short
+    // body right away rather than wait for bytes that will never come.
+    let up = raw_upstream(
+        b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\nConnection: close\r\n\r\nonly a few bytes",
+    );
+    let base = sito_at(&[up]);
+
+    let (code, body) = get(&format!("{base}/nar/x.nar")).unwrap();
+    assert_eq!(code, 200);
+    assert_eq!(body, b"only a few bytes");
+    let status = status_of(&base);
+    assert_eq!(status["upstreams"][0]["errors"], 1);
+    assert!(status["upstreams"][0]["nar_mbytes_per_sec"].is_null());
+}
+
+#[test]
+fn nar_body_failing_before_first_byte_falls_through() {
+    // Headers then nothing: the next upstream still gets its turn, because
+    // nothing has reached the client yet.
+    let broken =
+        raw_upstream(b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\nConnection: close\r\n\r\n");
+    let full = mock_upstream(vec![("/nar/x.nar", NAR_BYTES)]);
+    let base = sito_at(&[broken, full]);
+
+    let (code, body) = get(&format!("{base}/nar/x.nar")).unwrap();
+    assert_eq!(code, 200);
+    assert_eq!(body, NAR_BYTES);
+    let status = status_of(&base);
+    assert_eq!(status["upstreams"][0]["errors"], 1);
+    assert_eq!(status["upstreams"][0]["hits"], 0);
+    assert_eq!(status["upstreams"][1]["hits"], 1);
+}

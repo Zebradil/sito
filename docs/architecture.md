@@ -103,7 +103,7 @@ The data `/status` reports, and where it comes from:
 | `probe_ms`        | Each successful probe (`GET /nix-cache-info`), as an EWMA.                           |
 | `narinfo_ms`      | Each successful narinfo fetch — measured from request start to response headers.     |
 | `nar_mbytes_per_sec` | When a NAR body reaches EOF, from bytes and elapsed time. Aborted transfers record nothing, so a cancelled build cannot poison the number. |
-| `hits`/`misses`/`errors` | Per attempt: 2xx / upstream 404 / transport failure.                         |
+| `hits`/`misses`/`errors` | Per attempt: 2xx / upstream 404 / transport failure, or a body that fails or idles out mid-transfer. |
 
 A transport error additionally kicks the probe thread, so recovery is measured
 in the seconds it takes one probe pass, not in `probe-interval-secs`.

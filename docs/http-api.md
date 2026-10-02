@@ -43,14 +43,16 @@ Forwarded to upstreams in selection-plan order. Per attempt:
 | 2xx             | stream/relay it to the client, record a hit, stop             |
 | 404             | record a miss, try the next upstream in the plan              |
 | transport error | record an error, mark the upstream down, kick a probe pass, try the next |
+| body fails before its first byte | same as a transport error — nothing has reached the client yet |
 
 If the plan is exhausted (or was empty because every upstream is marked down),
 sito answers `404 no upstream has this path` and Nix falls through to its next
 substituter or a local build.
 
 The upstream's status code is mirrored. Response headers are **not** passed
-through wholesale: only `Content-Type` and `Content-Length` are copied, and the
-length sito sends is always the length of what sito sends. The body is
+through wholesale: only `Content-Type` is copied, plus `Content-Length` for
+narinfos and `HEAD` answers, where it is always the length of what sito sends.
+NAR bodies go out chunked, without a `Content-Length` (see below). The body is
 byte-identical to the upstream's (pass-through trust,
 [ADR-0006](adr/0006-pass-through-trust.md)) — signature verification stays in
 the Nix client.
@@ -69,12 +71,17 @@ is tried against the upstream whose narinfo named it first, falling through to
 the normal tier walk if that upstream no longer has it. A narinfo larger than
 1 MiB is served truncated, with the truncated length, so the client rejects a
 malformed narinfo instead of waiting on bytes that never arrive; real narinfos
-are well under a kilobyte. NAR bodies are never buffered: they stream through a
-metering reader that records throughput once the transfer completes.
+are well under a kilobyte. A narinfo body that fails to read counts as a
+failed attempt, and the next upstream is tried.
 
-A failure while reading a narinfo body from the upstream (after the response
-headers already arrived) answers `502 upstream read failed` — no other upstream
-is tried, because the client has already been told a response is coming.
+NAR bodies are never buffered: they stream through a metering reader that
+records throughput once the transfer completes. sito waits for the first body
+chunk before answering, so an upstream that sends headers and then stalls
+still falls through to the next one. Once NAR bytes have gone out there is no
+switching: if the upstream fails or goes idle for 60 s mid-body, sito records
+an error and ends the chunked body there. Nix rejects the short NAR at once
+instead of waiting out its 300 s `stalled-download-timeout`; it cannot resume
+it, since sito advertises no `Accept-Ranges`.
 
 ## `GET /status`
 
@@ -139,7 +146,7 @@ $ curl -s localhost:5001/status | jq
 | `nar_mbytes_per_sec` | float \| null | EWMA of NAR download throughput, in **megabytes per second** (`bytes / 1e6 / seconds`). `null` until a NAR transfer completes; aborted transfers contribute nothing. Currently informational — the built-in engine does not rank on it. |
 | `hits`       | int           | Successful (2xx) upstream responses served through this upstream, narinfo and NAR alike.                                                      |
 | `misses`     | int           | 404s from this upstream — it simply does not have the path. Normal and expected for a small LAN cache in front of a big one.                  |
-| `errors`     | int           | Transport failures (connection refused, timeout, TLS, …). Each one also sets `healthy` to `false` and kicks an immediate probe pass. A rising `errors` count with `healthy: true` means the upstream is flapping. |
+| `errors`     | int           | Transport failures (connection refused, timeout, TLS, …), including NAR and narinfo bodies that fail or go idle mid-transfer. Each one also sets `healthy` to `false` and kicks an immediate probe pass. A rising `errors` count with `healthy: true` means the upstream is flapping. |
 
 All EWMAs use α = 0.3 on the newest sample, seeded with the first sample, so
 roughly the last handful of measurements dominate and a network change is
