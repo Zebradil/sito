@@ -79,15 +79,19 @@ cache ([ADR-0003](adr/0003-tiered-selection.md)).
 `DefaultEngine` (`src/select.rs`) applies, in order:
 
 1. **Affinity** — for a NAR request with a remembered upstream, that upstream
-   goes first, unless it is marked down.
+   goes first, even when marked down: it is usually the only cache that can
+   have the NAR, and a probe verdict can be seconds stale during a flap.
 2. **Tier order** — tiers strictly in config order, no cross-tier reordering.
 3. **Rank within a tier** — ascending `narinfo_ms`, falling back to `probe_ms`.
    Upstreams with neither sort to the back of their tier and keep config order
    among themselves (the sort is stable).
-4. **Health gate** — anything with `healthy == false` is dropped entirely. It
-   comes back only when a probe says so.
+4. **Health gate** — anything with `healthy == false` is dropped entirely,
+   except the affinity upstream. It comes back only when a probe says so.
 
-An empty plan (everything down) means a `404` without asking anyone.
+An empty plan (everything down) means a `404` without asking anyone. When the
+affinity upstream *failed* (as opposed to answering 404) and the rest of the
+plan missed, the worker retries the affinity upstream 3 times, 5 s apart,
+before answering `404` — see [http-api.md](http-api.md) for why not a `5xx`.
 
 The engine's input and output are plain `serde` types, and the core never
 reaches around them. That is the seam a scripting engine would slot into later

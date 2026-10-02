@@ -10,9 +10,11 @@ v1 implements only `sequential`: within a tier, upstreams are tried by current
 rank, skipping upstreams the probe marks down; a hit wins, a miss moves on; when
 every tier misses, sito answers 404 and Nix proceeds (next substituter or local
 build). A NAR is tried first at the upstream whose narinfo answered, because
-narinfo `URL:` fields are relative to their own cache; that affinity is a
-preference, not a pin, so if the remembered upstream 404s or fails the walk
-carries on through the tiers. Caches that share the content-addressed
+narinfo `URL:` fields are relative to their own cache — even when the probe
+marks it down, since it is usually the only cache that can have the NAR and a
+probe verdict lags a flap. That affinity is a preference, not a pin, so if the
+remembered upstream 404s or fails the walk carries on through the tiers; if it
+failed and the walk finds nothing, it is retried a few times before the 404. Caches that share the content-addressed
 `nar/<filehash>` layout will have the path or 404 cheaply, and a body from the
 wrong file fails the client's own NAR hash check, so the extra attempts cost
 nothing but a round trip.

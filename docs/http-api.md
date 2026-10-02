@@ -67,8 +67,13 @@ at sito should know.
 
 Narinfo bodies are read into memory with a 1 MiB cap so the `URL:` field can be
 parsed and remembered as **NAR affinity** — the next request for that NAR path
-is tried against the upstream whose narinfo named it first, falling through to
-the normal tier walk if that upstream no longer has it. A narinfo larger than
+is tried against the upstream whose narinfo named it first, even if a probe
+currently marks it down, falling through to the normal tier walk if that
+upstream no longer has it. If the affinity upstream *failed* and every other
+upstream missed, sito retries it 3 times, 5 s apart, before answering `404`.
+It deliberately does not answer `503`: Nix retries a `5xx`, but once those
+retries run out a failed NAR download fails the whole build unless
+`--fallback` is set, whereas a `404` makes Nix build that one path locally. A narinfo larger than
 1 MiB is served truncated, with the truncated length, so the client rejects a
 malformed narinfo instead of waiting on bytes that never arrive; real narinfos
 are well under a kilobyte. A narinfo body that fails to read counts as a

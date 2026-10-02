@@ -167,6 +167,14 @@ fn selection_input(app: &App, kind: RequestKind, path: &str) -> SelectionInput {
 /// An exhausted plan — including an empty one, when every upstream is down —
 /// is a 404. That is the correct answer for Nix: it moves to the next
 /// substituter or builds locally (ADR-0002).
+///
+/// Except when the NAR's affinity upstream *failed* rather than missed: the
+/// other upstreams' 404s say nothing about a path relative to another cache,
+/// so sito first retries the affinity upstream a few times to ride out a
+/// short flap. It answers 404 only after that, rather than a 5xx that Nix
+/// would retry: once Nix's own retries ran out, a 5xx on a NAR fails the
+/// whole build unless `--fallback` is set, while a 404 lets Nix build that
+/// path locally.
 fn forward(app: &App, req: Request, kind: RequestKind) {
     let path = req.url().to_string();
     let head = *req.method() == Method::Head;
@@ -174,13 +182,31 @@ fn forward(app: &App, req: Request, kind: RequestKind) {
     let Plan { attempts } = app.engine.plan(&input);
     tracing::debug!(path, ?attempts, "plan");
 
+    let mut affinity_failed = None;
     for idx in attempts {
-        if let Attempt::Hit(resp) = attempt(app, idx, &path, kind, head) {
-            return respond(req, resp);
+        match attempt(app, idx, &path, kind, head) {
+            Attempt::Hit(resp) => return respond(req, resp),
+            Attempt::Failed if input.affinity == Some(idx) => affinity_failed = Some(idx),
+            Attempt::Miss | Attempt::Failed => {}
+        }
+    }
+    if let Some(idx) = affinity_failed {
+        for _ in 0..AFFINITY_RETRIES {
+            std::thread::sleep(AFFINITY_RETRY_DELAY);
+            match attempt(app, idx, &path, kind, head) {
+                Attempt::Hit(resp) => return respond(req, resp),
+                Attempt::Miss => break,
+                Attempt::Failed => {}
+            }
         }
     }
     respond(req, text(404, "no upstream has this path"));
 }
+
+/// Extra tries at a failed affinity upstream, [`AFFINITY_RETRY_DELAY`] apart:
+/// about 15 s of waiting, enough for the VPN-dependent flaps seen in practice.
+const AFFINITY_RETRIES: u32 = 3;
+const AFFINITY_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// How one upstream answered one request.
 enum Attempt {

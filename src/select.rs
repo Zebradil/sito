@@ -61,16 +61,18 @@ pub trait SelectionEngine: Send + Sync {
 /// upstreams ranked by observed latency (narinfo EWMA, falling back to probe
 /// EWMA), unmeasured ones keeping config order at the back; upstreams marked
 /// down are skipped entirely — the probe loop owns bringing them back.
+///
+/// The affinity upstream is the one exception to the health gate: it goes
+/// first even when marked down. A narinfo `URL:` is relative to the cache that
+/// served it, so that upstream is usually the only one that can have the NAR,
+/// and a probe verdict can be seconds stale during a flap. Trying it costs at
+/// most a connect timeout.
 pub struct DefaultEngine;
 
 impl SelectionEngine for DefaultEngine {
     fn plan(&self, input: &SelectionInput) -> Plan {
         let mut attempts = Vec::new();
-        if let Some(idx) = input.affinity
-            && !is_down(input, idx)
-        {
-            attempts.push(idx);
-        }
+        attempts.extend(input.affinity);
         for tier in &input.tiers {
             let mut ranked: Vec<&UpstreamSnapshot> = tier
                 .upstreams
@@ -90,16 +92,6 @@ impl SelectionEngine for DefaultEngine {
         }
         Plan { attempts }
     }
-}
-
-/// Whether `idx` is known-down. An index no tier mentions reads as not down;
-/// it simply never gets appended by the tier walk that follows.
-fn is_down(input: &SelectionInput, idx: usize) -> bool {
-    input
-        .tiers
-        .iter()
-        .flat_map(|t| &t.upstreams)
-        .any(|u| u.index == idx && u.healthy == Some(false))
 }
 
 /// Rank key within a tier, in milliseconds; lower is better. Real traffic
@@ -190,14 +182,14 @@ mod tests {
     }
 
     #[test]
-    fn affinity_goes_first_unless_down() {
+    fn affinity_goes_first_even_when_down() {
         let mut inp = input(vec![vec![snap(0, 0), snap(1, 0)]]);
         inp.kind = RequestKind::Nar;
         inp.affinity = Some(1);
         assert_eq!(DefaultEngine.plan(&inp).attempts, vec![1, 0]);
 
         inp.tiers[0].upstreams[1].healthy = Some(false);
-        assert_eq!(DefaultEngine.plan(&inp).attempts, vec![0]);
+        assert_eq!(DefaultEngine.plan(&inp).attempts, vec![1, 0]);
     }
 
     #[test]

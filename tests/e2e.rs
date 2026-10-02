@@ -198,3 +198,47 @@ fn nar_body_failing_before_first_byte_falls_through() {
     assert_eq!(status["upstreams"][0]["hits"], 0);
     assert_eq!(status["upstreams"][1]["hits"], 1);
 }
+
+#[test]
+fn failed_affinity_upstream_is_retried_before_404() {
+    // Only `flaky` has the NAR, and it drops the first NAR request: the
+    // other upstream's 404 must not be the final answer.
+    use std::io::Write;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let flaky = format!("http://{}", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        let mut nar_requests = 0;
+        for mut conn in listener.incoming().flatten() {
+            let mut buf = [0; 4096];
+            let n = conn.read(&mut buf).unwrap_or(0);
+            let line = String::from_utf8_lossy(&buf[..n]).to_string();
+            let body: &[u8] = if line.starts_with("GET /nix-cache-info ") {
+                b"StoreDir: /nix/store\n"
+            } else if line.starts_with("GET /abc.narinfo ") {
+                NARINFO.as_bytes()
+            } else {
+                nar_requests += 1;
+                if nar_requests == 1 {
+                    continue; // drop the connection unanswered
+                }
+                NAR_BYTES
+            };
+            let _ = write!(
+                conn,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = conn.write_all(body);
+        }
+    });
+    let empty = mock_upstream(vec![]);
+    let base = sito_at(&[flaky, empty]);
+
+    get(&format!("{base}/abc.narinfo")).unwrap();
+    let (code, body) = get(&format!("{base}/nar/deadbeef.nar.xz")).unwrap();
+    assert_eq!(code, 200);
+    assert_eq!(body, NAR_BYTES);
+    let status = status_of(&base);
+    assert_eq!(status["upstreams"][0]["errors"], 1);
+    assert_eq!(status["upstreams"][1]["misses"], 1);
+}
