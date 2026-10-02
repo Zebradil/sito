@@ -30,3 +30,9 @@ Deferred by design (see `docs/adr/`):
   nix-serve behind Basic) are read as down today, since sito sends no
   credentials. Read the machine's `netrc` via a `netrc-file` key when built
   (ADR-0008).
+
+## Docs
+
+- onboard docs-kit
+- add comparison with ncro (see ./ncro-cmp.md)
+- pull improvement suggestions from ./ncro-cmp.md
