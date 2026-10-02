@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: zebradil/nix-ci/.github/actions/setup-nix@0e167a89e52d8d3e0dfeb5619d6e6f715a4ea661 # v1.3.0
+      - uses: zebradil/nix-ci/.github/actions/setup-nix@8cdc577c41dd17315faa6e049771a858ff872718 # v2.0.0
         with:
           # Binary cache, read side. Plain public HTTPS reads, so this works
           # for fork pull requests too — `vars` are exposed to them, unlike
@@ -46,13 +46,13 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: zebradil/nix-ci/.github/actions/setup-nix@0e167a89e52d8d3e0dfeb5619d6e6f715a4ea661 # v1.3.0
+      - uses: zebradil/nix-ci/.github/actions/setup-nix@8cdc577c41dd17315faa6e049771a858ff872718 # v2.0.0
         with:
           extra-substituters: ${{ vars.NIX_CACHE_URL }}
           extra-trusted-public-keys: ${{ vars.NIX_CACHE_PUBLIC_KEY }}
           signing-key: ${{ secrets.CACHE_SIGNING_KEY }}
 
-      - uses: zebradil/nix-ci/.github/actions/build@608cb528aa77eaca541eef83aec7651a05fd4c71 # Zebradil/nix-ci#17
+      - uses: zebradil/nix-ci/.github/actions/build@8cdc577c41dd17315faa6e049771a858ff872718 # v2.0.0
         with:
           attr: checks.${{ matrix.system }}
           # Empty without the AWS secrets, so a fork pull request builds without
