@@ -114,8 +114,14 @@ Two `ureq` agents with deliberately different timeouts:
 
 - **`info_agent`** — narinfo requests, 10 s *global* timeout. Narinfos are tiny;
   anything slow is a broken upstream, not a big download.
-- **`nar_agent`** — NAR downloads, 5 s *connect* timeout and no body deadline. A
-  multi-gigabyte closure over a slow link must not be killed by a clock.
+- **`nar_agent`** — NAR downloads: 5 s DNS, 5 s connect, then a 60 s *idle*
+  timeout on every wait for upstream bytes (headers and body), and no overall
+  deadline. A multi-gigabyte closure over a slow link must not be killed by a
+  clock, but a flow that has gone silent — a VPN drop leaves no FIN or RST, and
+  sito never writes upstream to find out — must not hold its thread forever.
+  60 s is well under Nix's 300 s `stalled-download-timeout`, so sito gives up
+  first. ureq has no idle timeout, so `IdleConnector` (`src/lib.rs`) caps each
+  socket read timeout ureq sets.
 
 The probe thread has its own agent with `probe-timeout-secs` as a global
 timeout.
