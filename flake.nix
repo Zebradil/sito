@@ -30,6 +30,7 @@
             ./Cargo.toml
             ./Cargo.lock
             ./src
+            ./tests/e2e.rs
           ];
         };
         cargoLock.lockFile = ./Cargo.lock;
