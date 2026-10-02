@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/Zebradil/sito/compare/v0.2.0...v0.2.1) (2026-10-02)
+
+
+### Documentation
+
+* add ncro-related todos ([f24f991](https://github.com/Zebradil/sito/commit/f24f9916cc92b21a8c47b236cabb48e3dcf94309))
+
 ## [0.2.0](https://github.com/Zebradil/sito/compare/v0.1.0...v0.2.0) (2026-10-02)
 
 
