@@ -24,8 +24,9 @@ pub struct Config {
     /// for this pass.
     #[serde(default = "default_probe_timeout")]
     pub probe_timeout_secs: u64,
-    /// Hard cap on concurrently served requests. Default 64. The cap is
-    /// backpressure, not rejection — see [`crate::proxy::serve`].
+    /// Hard cap on concurrent NAR transfers. Default 64. The cap is
+    /// backpressure, not rejection, and narinfo lookups are not counted
+    /// against it — see `proxy::Slots`.
     #[serde(default = "default_max_inflight")]
     pub max_inflight: usize,
     /// Tiers in the order they are tried. Written as repeated `[[tier]]`

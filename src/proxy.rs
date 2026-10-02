@@ -27,8 +27,11 @@ pub struct App {
     pub tiers: Vec<TierShape>,
     /// narinfo and probe-sized requests: bounded end to end.
     pub info_agent: ureq::Agent,
-    /// NAR downloads: bounded connect, unbounded body.
+    /// NAR downloads: bounded DNS, connect and idle time, no overall
+    /// deadline.
     pub nar_agent: ureq::Agent,
+    /// Caps concurrent NAR transfers (`max-inflight`).
+    pub(crate) nar_slots: Slots,
 }
 
 /// Static tier shape from config: which upstream indices belong to which
@@ -45,15 +48,18 @@ pub struct TierShape {
 /// a listener that is actually dead trips it in ten seconds.
 const MAX_ACCEPT_FAILURES: u32 = 100;
 
-/// Serve until the listener dies. Thread per request with a hard in-flight
-/// cap, kasha-style: a slot is held for the whole transfer.
+/// Serve until the listener dies, one thread per request.
+///
+/// The loop itself never waits on anything but `recv`: the concurrency cap
+/// applies to NAR transfers only and is taken inside the handler (see
+/// [`Slots`]), so stuck NARs can never stop narinfo lookups or `/status` from
+/// being dispatched.
 ///
 /// Blocks the calling thread and, in normal operation, never returns. The one
 /// exit is `MAX_ACCEPT_FAILURES` accept failures in a row, which means the
 /// listener is gone and no future request can arrive. Failure to *spawn* a
 /// handler is not fatal: that request is shed and the loop carries on.
-pub fn serve(app: Arc<App>, server: Server, max_inflight: usize) -> Result<()> {
-    let slots = Arc::new(Slots::new(max_inflight));
+pub fn serve(app: Arc<App>, server: Server) -> Result<()> {
     let mut failures = 0u32;
     loop {
         let req = match server.recv() {
@@ -69,14 +75,10 @@ pub fn serve(app: Arc<App>, server: Server, max_inflight: usize) -> Result<()> {
             }
         };
         failures = 0;
-        let slot = slots.acquire();
         let app = app.clone();
         let spawned = std::thread::Builder::new()
             .stack_size(512 * 1024)
-            .spawn(move || {
-                let _slot = slot;
-                handle(&app, req);
-            });
+            .spawn(move || handle(&app, req));
         if let Err(e) = spawned {
             tracing::error!(error = %e, "spawn failed, shedding request");
         }
@@ -121,6 +123,7 @@ fn status(app: &App, req: Request) {
     let body = serde_json::json!({
         "uptime_secs": app.registry.started.elapsed().as_secs(),
         "affinity_entries": app.registry.affinity_len(),
+        "nar_slots": {"used": app.nar_slots.used(), "max": app.nar_slots.max},
         "upstreams": app.registry.snapshot(),
     });
     let mut resp = Response::from_string(body.to_string());
@@ -181,6 +184,7 @@ fn forward(app: &App, req: Request, kind: RequestKind) {
     let input = selection_input(app, kind, &path);
     let Plan { attempts } = app.engine.plan(&input);
     tracing::debug!(path, ?attempts, "plan");
+    let _slot = (kind == RequestKind::Nar).then(|| app.nar_slots.acquire());
 
     let mut affinity_failed = None;
     for idx in attempts {
@@ -461,18 +465,28 @@ impl Drop for MeteredReader {
     }
 }
 
-/// Counting semaphore over in-flight requests, the whole backpressure
-/// mechanism. Nothing else bounds memory or upstream fan-out.
-struct Slots {
+/// Counting semaphore over concurrent NAR transfers, the backpressure that
+/// bounds memory and upstream fan-out.
+///
+/// NARs only: narinfo and sito's own endpoints are cheap and time-bounded,
+/// and putting them behind the same cap is what let stuck NAR transfers
+/// starve lookups. The slot is taken in the handler thread, not the accept
+/// loop, so a full cap delays only the NARs waiting for it; a waiting thread
+/// holds nothing but its stack, and the Nix daemon's own connection cap
+/// (`http-connections`, 25 by default) bounds how many there are.
+pub(crate) struct Slots {
     used: std::sync::Mutex<usize>,
     freed: std::sync::Condvar,
     max: usize,
 }
 
+/// How long a NAR may wait for a slot before sito logs that the cap is full.
+const SLOT_WAIT_WARN: std::time::Duration = std::time::Duration::from_secs(5);
+
 impl Slots {
-    /// `max` is clamped to at least 1, since a zero cap would deadlock the
-    /// accept loop on the first request.
-    fn new(max: usize) -> Self {
+    /// `max` is clamped to at least 1, since a zero cap would block every NAR
+    /// forever.
+    pub(crate) fn new(max: usize) -> Self {
         Slots {
             used: std::sync::Mutex::new(0),
             freed: std::sync::Condvar::new(),
@@ -480,26 +494,35 @@ impl Slots {
         }
     }
 
-    /// Take a slot, blocking the caller — the accept loop — until one frees
-    /// up. Blocking there rather than rejecting is the point: the kernel
-    /// backlog queues the excess and Nix sees a slow proxy instead of a
-    /// failing one.
-    fn acquire(self: &Arc<Self>) -> Slot {
-        let mut used = self
+    /// Take a slot, blocking until one frees up. Blocking rather than
+    /// rejecting is the point: Nix sees a slow proxy instead of a failing one.
+    /// A wait past [`SLOT_WAIT_WARN`] is logged once, since a cap that stays
+    /// full usually means transfers are stuck, not busy.
+    fn acquire(&self) -> Slot<'_> {
+        let full = |used: &mut usize| *used >= self.max;
+        let (mut used, wait) = self
             .freed
-            .wait_while(self.used.lock().unwrap(), |used| *used >= self.max)
+            .wait_timeout_while(self.used.lock().unwrap(), SLOT_WAIT_WARN, full)
             .unwrap();
+        if wait.timed_out() {
+            tracing::warn!(max = self.max, "all NAR slots busy, waiting");
+            used = self.freed.wait_while(used, full).unwrap();
+        }
         *used += 1;
-        Slot(Arc::clone(self))
+        Slot(self)
+    }
+
+    fn used(&self) -> usize {
+        *self.used.lock().unwrap()
     }
 }
 
-/// A held slot, released on drop. It lives in the handler thread for the
-/// whole request including the NAR body, so the cap counts bytes in flight,
-/// not just requests being parsed.
-struct Slot(Arc<Slots>);
+/// A held slot, released on drop. It lives for the whole NAR request
+/// including the body, so the cap counts transfers in flight, not just
+/// requests being planned.
+struct Slot<'a>(&'a Slots);
 
-impl Drop for Slot {
+impl Drop for Slot<'_> {
     fn drop(&mut self) {
         *self.0.used.lock().unwrap() -= 1;
         self.0.freed.notify_one();

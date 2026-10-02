@@ -135,9 +135,12 @@ black hole — check `probe-timeout-secs` and the `upstream failed` warnings.
   fault, nothing is recorded.
 
 **Large builds stall at high concurrency.**
-`max-inflight` (default 64) bounds concurrent transfers, and a slot is held for
-a whole NAR download. Raise it if `nix build -j` with many parallel downloads
-plateaus below the link speed.
+`max-inflight` (default 64) bounds concurrent NAR transfers, and a slot is held
+for a whole NAR download. `nar_slots` in `/status` shows how many are out. If
+`used` sits at `max` while bytes flow, raise the cap; if it sits there with
+nothing moving (`all NAR slots busy, waiting` in the log), transfers are stuck —
+each gives up after 60 s without bytes, so look for `NAR upstream read failed`
+naming the upstream.
 
 ## Development
 

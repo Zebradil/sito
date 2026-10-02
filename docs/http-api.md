@@ -101,6 +101,7 @@ $ curl -s localhost:5001/status | jq
 {
   "uptime_secs": 3812,
   "affinity_entries": 214,
+  "nar_slots": { "used": 2, "max": 64 },
   "upstreams": [
     {
       "index": 0,
@@ -136,6 +137,7 @@ $ curl -s localhost:5001/status | jq
 | ------------------ | ------ | -------------------------------------------------------------------------------------------------------------------- |
 | `uptime_secs`      | int    | Whole seconds since this process built its registry, i.e. process uptime. All counters and averages below are scoped to it — nothing survives a restart ([ADR-0004](adr/0004-quality-signal.md)). |
 | `affinity_entries` | int    | NAR paths currently remembered in the narinfo→upstream affinity map. Bounded at 4096; when full the whole map is dropped, so this number sawtooths rather than plateaus. It is metadata, not a response cache. |
+| `nar_slots`        | object | `used`: NAR transfers in flight right now; `max`: the `max-inflight` cap. `used` pinned at `max` while downloads crawl means transfers are stuck, not busy — sito also logs `all NAR slots busy, waiting`. |
 | `upstreams`        | array  | One object per configured upstream, in flat config order (tier 0's upstreams first, then tier 1's, …).                 |
 
 ### Per upstream

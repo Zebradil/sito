@@ -35,7 +35,7 @@ listen = "127.0.0.1:5001"
 probe-interval-secs = 15
 probe-timeout-secs = 3
 
-# Hard cap on concurrent in-flight requests.
+# Hard cap on concurrent NAR transfers.
 max-inflight = 64
 
 # Tier 0: my own caches, LAN first, its public mirror second.
@@ -66,7 +66,7 @@ strategy = "sequential"
 | `listen`              | string | `"127.0.0.1:5001"` | `host:port` to bind. Keep it on loopback: sito is an unauthenticated read-only proxy for the local machine. Port `0` binds an ephemeral port (used by the tests).                |
 | `probe-interval-secs` | int    | `15`               | Seconds between probe passes. This bounds how long stale reachability data can survive a network change. Lower costs one tiny request per upstream per interval.                |
 | `probe-timeout-secs`  | int    | `3`                | Global per-probe timeout. An upstream that does not answer `GET /nix-cache-info` within this is marked down. Must comfortably exceed the worst legitimate round-trip.            |
-| `max-inflight`        | int    | `64`               | Maximum requests being served at once. A slot is held for the *entire* transfer, NAR body included; past the cap the accept loop blocks, which is the backpressure. Values below 1 are treated as 1. |
+| `max-inflight`        | int    | `64`               | Maximum NAR transfers being served at once. A slot is held for the *entire* transfer, body included; past the cap further NAR requests wait for a slot, which is the backpressure. Narinfo lookups and sito's own endpoints are not counted and never wait. Values below 1 are treated as 1. |
 | `[[tier]]`            | array  | —                  | Ordered tiers. Required in practice: a config with no upstreams anywhere is rejected.                                                                                          |
 
 ### `[[tier]]`

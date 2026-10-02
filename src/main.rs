@@ -33,5 +33,5 @@ fn main() -> Result<()> {
         upstreams = app.registry.snapshot().len(),
         "sito serving"
     );
-    sito::serve(app, server, cfg.max_inflight)
+    sito::serve(app, server)
 }

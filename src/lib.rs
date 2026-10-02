@@ -91,6 +91,7 @@ pub fn build(cfg: &config::Config) -> Result<(Arc<App>, Server)> {
         tiers,
         info_agent,
         nar_agent,
+        nar_slots: proxy::Slots::new(cfg.max_inflight),
     });
     let server =
         Server::http(&cfg.listen).map_err(|e| anyhow::anyhow!("bind {}: {e}", cfg.listen))?;
@@ -194,8 +195,8 @@ impl Transport for IdleTransport {
 
 /// Run the accept loop on the calling thread. Blocks forever in normal
 /// operation; see [`proxy::serve`] for the failure mode that ends it.
-pub fn serve(app: Arc<App>, server: Server, max_inflight: usize) -> Result<()> {
-    proxy::serve(app, server, max_inflight)
+pub fn serve(app: Arc<App>, server: Server) -> Result<()> {
+    proxy::serve(app, server)
 }
 
 #[cfg(test)]

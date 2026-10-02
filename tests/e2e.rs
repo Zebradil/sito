@@ -31,14 +31,21 @@ fn mock_upstream(routes: Vec<(&'static str, &'static [u8])>) -> String {
 /// sito wired to the given upstreams, one tier each, listening on an
 /// ephemeral port.
 fn sito_at(upstreams: &[String]) -> String {
+    sito_with(upstreams, 8)
+}
+
+fn sito_with(upstreams: &[String], max_inflight: usize) -> String {
     let tiers = upstreams
         .iter()
         .map(|u| format!("[[tier]]\n  [[tier.upstream]]\n  url = \"{u}\"\n"))
         .collect::<String>();
-    let cfg = sito::config::Config::parse(&format!("listen = \"127.0.0.1:0\"\n{tiers}")).unwrap();
+    let cfg = sito::config::Config::parse(&format!(
+        "listen = \"127.0.0.1:0\"\nmax-inflight = {max_inflight}\n{tiers}"
+    ))
+    .unwrap();
     let (app, server) = sito::build(&cfg).unwrap();
     let port = server.server_addr().to_ip().unwrap().port();
-    std::thread::spawn(move || sito::serve(app, server, 8));
+    std::thread::spawn(move || sito::serve(app, server));
     format!("http://127.0.0.1:{port}")
 }
 
@@ -241,4 +248,46 @@ fn failed_affinity_upstream_is_retried_before_404() {
     let status = status_of(&base);
     assert_eq!(status["upstreams"][0]["errors"], 1);
     assert_eq!(status["upstreams"][1]["misses"], 1);
+}
+
+#[test]
+fn stuck_nar_does_not_block_narinfo() {
+    // One NAR slot, taken by a NAR whose upstream accepted and went silent.
+    use std::io::Write;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let silent = format!("http://{}", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for mut conn in listener.incoming().flatten() {
+            let mut buf = [0; 4096];
+            let n = conn.read(&mut buf).unwrap_or(0);
+            if buf[..n].starts_with(b"GET /nix-cache-info ") {
+                let _ = conn.write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                );
+            } else {
+                std::thread::spawn(move || {
+                    let _ = conn.read(&mut buf);
+                    std::thread::sleep(std::time::Duration::from_secs(120));
+                });
+            }
+        }
+    });
+    let full = mock_upstream(vec![("/abc.narinfo", NARINFO.as_bytes())]);
+    let base = sito_with(&[full, silent], 1);
+
+    let nar = format!("{base}/nar/stuck.nar");
+    std::thread::spawn(move || get(&nar));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while status_of(&base)["nar_slots"]["used"] != 1 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "NAR never took its slot"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    let (code, body) = get(&format!("{base}/abc.narinfo")).unwrap();
+    assert_eq!(code, 200);
+    assert_eq!(body, NARINFO.as_bytes());
+    assert_eq!(status_of(&base)["nar_slots"]["max"], 1);
 }

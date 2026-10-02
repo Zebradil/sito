@@ -22,12 +22,13 @@ quality signal, probe, pass-through) is defined in
 Three kinds, no async runtime:
 
 - **The accept loop** (`proxy::serve`, on the main thread) — takes one request
-  at a time off `tiny_http`, acquires a concurrency slot, spawns a worker.
-  Acquiring blocks when `max-inflight` slots are already out, so the cap is
-  applied by backpressure rather than by queueing or rejection.
+  at a time off `tiny_http` and spawns a worker. It never blocks on anything
+  else, so a stuck transfer cannot keep other requests from being dispatched.
 - **One worker thread per request** (512 KiB stack) — does the whole thing:
-  plan, fetch, stream, respond. It holds its slot until the last byte is
-  written, so a slow NAR really does occupy a slot for its whole transfer.
+  plan, fetch, stream, respond. A NAR worker first takes one of `max-inflight`
+  slots, waiting if none is free — backpressure rather than rejection — and
+  holds it until the last byte is written, so a slow NAR really does occupy a
+  slot for its whole transfer. Narinfo workers take no slot.
 - **The probe thread** — one, detached, never exits. Probes all upstreams, then
   waits `probe-interval-secs` on a channel that a failure can cut short.
 
@@ -50,7 +51,7 @@ Tier membership is carried alongside (`TierShape` for the shape,
 client (nix)
    │  GET /<hash>.narinfo
    ▼
-accept loop ── slot ──▶ worker thread
+accept loop ─────────▶ worker thread
                           │
                           │ 1. snapshot Registry, build SelectionInput
                           ▼
