@@ -11,9 +11,9 @@ which mesh it lands on. A sibling of [kasha](https://github.com/Zebradil/kasha)
 (the LAN cache box) in spirit, but strictly independent — neither project
 depends on the other, and sito works with any HTTP binary caches.
 
-Status: core v1 implemented. Decisions live in `docs/adr/`, reference
-documentation in `docs/` (configuration, HTTP API, architecture,
-operations), deferred work in `todo.md`.
+Status: core v1 implemented. Decisions live in `docs/adr/`, user
+documentation in the docs site under `docs/src/content/docs/`, deferred work
+in `todo.md`.
 
 ## Language
 

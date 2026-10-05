@@ -13,14 +13,21 @@ and darwinModule are implemented.
 
 ## Documentation
 
-- [Configuration](docs/configuration.md) — every TOML key, CLI flag, and
-  `services.sito` module option, with defaults.
-- [HTTP API](docs/http-api.md) — the routes sito answers and every field
-  `/status` reports.
-- [Architecture](docs/architecture.md) — threads, request lifecycle, where the
-  numbers come from.
-- [Running and troubleshooting](docs/operations.md) — service management, logs,
-  symptom-to-cause table, dev loop.
+The docs site, [zebradil.github.io/sito](https://zebradil.github.io/sito/), has:
+
+- [Getting started](https://zebradil.github.io/sito/getting-started/) — run sito and fetch a path through
+  it in a few minutes.
+- [Configure tiers and upstreams](https://zebradil.github.io/sito/guides/configure-upstreams/) — every
+  TOML key and CLI flag, with defaults.
+- [Run sito with the NixOS or nix-darwin module](https://zebradil.github.io/sito/guides/nix-modules/) —
+  every `services.sito` option.
+- [Troubleshoot sito](https://zebradil.github.io/sito/guides/troubleshooting/) — logs, every `/status`
+  field, symptom-to-cause list.
+- Concepts: [how sito picks an upstream](https://zebradil.github.io/sito/concepts/selection/),
+  [trust model](https://zebradil.github.io/sito/concepts/trust/), [architecture](https://zebradil.github.io/sito/concepts/architecture/).
+
+In this repository:
+
 - [`CONTEXT.md`](CONTEXT.md) — the project's vocabulary.
 - [`docs/adr/`](docs/adr/) — why it is built this way; [`todo.md`](todo.md) —
   what was deliberately deferred.
@@ -34,7 +41,7 @@ and darwinModule are implemented.
 - Trust stays in the Nix client: narinfos pass through unmodified, sito holds
   no keys.
 - `/status` JSON endpoint exposes what the ranker sees
-  ([field reference](docs/http-api.md#get-status)).
+  ([field reference](https://zebradil.github.io/sito/guides/troubleshooting/#3-read-status)).
 - Ships a nixosModule (`x86_64-linux`) and darwinModule (`aarch64-darwin`)
   that run the daemon and manage `substituters` / `trusted-public-keys` by
   default.
@@ -108,7 +115,23 @@ mutually exclusive with `tiers`. With the default
 `manageSubstituters = true`, the module points `nix.settings.substituters` at
 sito's own `listen` address and trusts every `public-keys` entry found across
 the tiers (see [ADR 0007](docs/adr/0007-nix-modules.md)). Full option
-reference: [docs/configuration.md](docs/configuration.md#nix-module-options).
+reference: [the module guide](https://zebradil.github.io/sito/guides/nix-modules/#options).
+
+## Development
+
+```console
+$ nix develop                     # cargo, clippy, rustfmt, rust-analyzer
+$ cargo test                      # unit tests plus the end-to-end suite
+$ cargo clippy --all-targets --all-features -- -D warnings
+$ cargo fmt --all
+$ nix flake check -L              # what CI's build job builds: fmt, clippy,
+                                  # and the package (cargo test again, in checkPhase)
+```
+
+`tests/e2e.rs` starts real mock upstreams and a real sito on ephemeral ports —
+tier fallback, affinity, dead upstreams and the read-only surface are covered
+there rather than with mocks. The docs site lives in `docs/` (docs-kit); build
+it with `npm ci && npm run build` from there.
 
 ## CI
 
@@ -116,8 +139,9 @@ reference: [docs/configuration.md](docs/configuration.md#nix-module-options).
 `nix flake check --no-build` up front, then `checks.<system>.*` — `build`
 (the package, which runs `cargo test` in its own checkPhase), `fmt`
 (`cargo fmt --check`), `clippy` — built and pushed to kasha's remote cache on
-every push to `main`. Pull requests read that cache but never write to it, so
-a client that trusts the key substitutes sito instead of compiling it:
+every push to `main` and every pull request from this repository. Fork pull
+requests get no secrets, so they build without publishing. A client that
+trusts the key substitutes sito instead of compiling it:
 
 ```nix
 nix.settings = {
@@ -126,10 +150,10 @@ nix.settings = {
 };
 ```
 
-Retention is kasha's: after the push, CI calls kasha's `emit-manifest` action
-to file a generation manifest under `roots/sito/`, one per system — a push
-with no manifest is invisible to kasha's retention and gets garbage
-collected on the next sweep. See `.github/workflows/ci.yml`.
+Retention is kasha's: after each push, nix-ci's build action files a kasha
+generation manifest under `roots/sito/`, in retention group
+`checks-<system>` — a push with no manifest is invisible to kasha's retention
+and gets garbage collected on the next sweep. See `.github/workflows/ci.yml`.
 
 ## Relation to kasha
 
