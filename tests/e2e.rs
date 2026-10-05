@@ -155,10 +155,23 @@ fn metrics_expose_traffic_in_prometheus_text_format() {
     get(&format!("{base}/abc.narinfo")).unwrap();
     get(&format!("{base}/nar/deadbeef.nar.xz")).unwrap();
 
-    let (code, body) = get(&format!("{base}/metrics")).unwrap();
-    assert_eq!(code, 200);
-    let text = String::from_utf8(body).unwrap();
+    // NAR throughput is recorded when sito drops the body reader, which can
+    // land just after the client has read the last byte.
+    let nar_done = format!(
+        "sito_upstream_nar_bytes_per_second_bucket{{url=\"{full}\",tier=\"1\",le=\"+Inf\"}} 1"
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let text = loop {
+        let (code, body) = get(&format!("{base}/metrics")).unwrap();
+        assert_eq!(code, 200);
+        let text = String::from_utf8(body).unwrap();
+        if text.lines().any(|l| l == nar_done) || std::time::Instant::now() > deadline {
+            break text;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
     for line in [
+        nar_done.clone(),
         format!("sito_upstream_requests_total{{url=\"{empty}\",tier=\"0\",result=\"miss\"}} 1"),
         format!("sito_upstream_requests_total{{url=\"{full}\",tier=\"1\",result=\"hit\"}} 2"),
         format!("sito_upstream_narinfo_seconds_count{{url=\"{full}\",tier=\"1\"}} 1"),
@@ -166,7 +179,9 @@ fn metrics_expose_traffic_in_prometheus_text_format() {
             "sito_upstream_nar_bytes_total{{url=\"{full}\",tier=\"1\"}} {}",
             NAR_BYTES.len()
         ),
-        "# TYPE sito_upstream_narinfo_seconds summary".into(),
+        "# TYPE sito_upstream_narinfo_seconds histogram".into(),
+        format!("sito_upstream_narinfo_seconds_bucket{{url=\"{full}\",tier=\"1\",le=\"+Inf\"}} 1"),
+        format!("sito_upstream_nar_bytes_per_second_count{{url=\"{empty}\",tier=\"0\"}} 0"),
     ] {
         assert!(
             text.lines().any(|l| l == line),

@@ -61,8 +61,12 @@ in
 
     scrapeInterval = lib.mkOption {
       type = lib.types.str;
-      default = "30s";
-      description = "How often vmagent scrapes sito.";
+      default = "10s";
+      description = ''
+        How often vmagent scrapes sito. Counters and histograms keep every
+        request between scrapes either way; a shorter interval adds timing
+        detail within a build, at the cost of queue space while offline.
+      '';
     };
 
     maxDiskUsage = lib.mkOption {
@@ -70,8 +74,8 @@ in
       default = "1GB";
       description = ''
         Cap on the on-disk queue (`-remoteWrite.maxDiskUsagePerURL`); past it
-        the oldest samples are dropped. sito's few dozen series take a few MB
-        a day at the default interval, so 1GB covers months offline.
+        the oldest samples are dropped. With four upstreams the queue grows by
+        about 19MB a day at a 10s interval, so 1GB covers about seven weeks.
       '';
     };
 

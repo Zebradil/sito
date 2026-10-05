@@ -36,7 +36,7 @@ The filter is `RUST_LOG`, set by the module's `logLevel` option:
 
 | Level | What you get |
 | --- | --- |
-| `sito=info` (default) | The startup line and one line per upstream state change, `upstream state changed url=… up=… reason=…`. Nothing per request. |
+| `sito=info` (default) | The startup line, one line per upstream state change (`upstream state changed url=… up=… reason=…`), and one line per NAR download (`NAR transfer done url=… bytes=… secs=… mbytes_per_sec=…`). Narinfo lookups are not logged: a build makes thousands. |
 | `sito=debug` | Adds the selection plan and the upstream that answered for every request, plus each response code. Use it when routing looks wrong. |
 
 These warnings appear at the default level:
@@ -46,7 +46,7 @@ These warnings appear at the default level:
 | `upstream failed` | A request to an upstream failed: connection, TLS, timeout, or an error status other than 404. The upstream is marked down. |
 | `narinfo body read failed` | The narinfo headers arrived but the body did not. Treated like `upstream failed`. |
 | `NAR upstream read failed` | A NAR body broke off or sent nothing for 60 s. The upstream is marked down. Before the first byte, sito tries the next upstream; after it, Nix gets a short body and fails that download. |
-| `slow NAR transfer` | A NAR completed but took 30 s or more at under 1 MB/s. |
+| `slow NAR transfer` | A NAR completed but took 30 s or more at under 1 MB/s. Logged in place of `NAR transfer done`. |
 | `all NAR slots busy, waiting` | A NAR request waited 5 s for one of the `max-inflight` slots. |
 | `accept failed` | The listener could not accept a connection. After 100 failures in a row sito exits. |
 
@@ -81,8 +81,6 @@ Per upstream:
 | `hits` | Requests this upstream answered, narinfo and NAR alike. |
 | `misses` | 404s: the upstream does not have the path. Routine for a small cache in front of a big one. |
 | `errors` | Failed requests, including NAR bodies that broke off. Each also sets `healthy` to `false` and starts a probe pass at once. |
-| `narinfo_hits` | Narinfos served: the narinfo share of `hits`. |
-| `narinfo_secs_total` | Sum of the narinfo latencies behind `narinfo_ms`, in seconds. |
 | `nar_bytes` | NAR body bytes passed to clients, including transfers that broke off. |
 
 The moving averages weigh the newest sample at 0.3, so a handful of requests is enough to reflect a network change.
@@ -105,7 +103,8 @@ curl -s http://127.0.0.1:5001/metrics
 | `sito_nar_slots_used`, `sito_nar_slots_max` | gauge | As `nar_slots` in `/status`. |
 | `sito_upstream_healthy` | gauge | `1` or `0`; absent until the first probe answers. |
 | `sito_upstream_requests_total` | counter | Requests per upstream, by `result`: `hit`, `miss` or `error`. |
-| `sito_upstream_narinfo_seconds` | summary | `_sum` and `_count` of narinfo latency, request to response headers. |
+| `sito_upstream_narinfo_seconds` | histogram | Narinfo latency, request to response headers. Buckets from 10 ms to 2.5 s. |
+| `sito_upstream_nar_bytes_per_second` | histogram | Throughput of completed NAR transfers. Buckets from 0.5 MB/s to 100 MB/s. |
 | `sito_upstream_nar_bytes_total` | counter | NAR body bytes passed to clients. |
 | `sito_upstream_probe_ewma_seconds` | gauge | `probe_ms`, in seconds. |
 | `sito_upstream_narinfo_ewma_seconds` | gauge | `narinfo_ms`, in seconds. |
@@ -114,10 +113,11 @@ curl -s http://127.0.0.1:5001/metrics
 Per-upstream metrics carry `url` and `tier` labels. An EWMA gauge is absent until its first sample. Counters reset when
 sito restarts, which `rate()` and `increase()` absorb.
 
-The EWMA gauges show what the ranker sees at scrape time. For latency over a window, use the summary instead:
+The EWMA gauges show what the ranker sees at scrape time. The histograms and counters keep every request between two
+scrapes, so a build shorter than the scrape interval still shows in full. For latency over a window, use the histogram:
 
 ```promql
-rate(sito_upstream_narinfo_seconds_sum[5m]) / rate(sito_upstream_narinfo_seconds_count[5m])
+histogram_quantile(0.95, sum by (url, le) (rate(sito_upstream_narinfo_seconds_bucket[5m])))
 ```
 
 ## Symptoms

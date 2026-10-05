@@ -10,7 +10,9 @@ use tiny_http::{Header, Method, Request, Response, Server};
 
 use crate::probe::Prober;
 use crate::select::{Plan, RequestKind, SelectionEngine, SelectionInput, TierInput};
-use crate::state::{Registry, UpstreamSnapshot};
+use crate::state::{
+    Histogram, NAR_BYTES_PER_SEC_BOUNDS, NARINFO_SECS_BOUNDS, Registry, UpstreamSnapshot,
+};
 
 /// Everything a request thread needs, shared immutably behind an `Arc`. The
 /// only mutable state is inside [`Registry`], which does its own locking.
@@ -195,17 +197,38 @@ fn metrics(app: &App, req: Request) {
                 .map(|(result, n)| (format!("{{{},result=\"{result}\"}}", labels(u)), n as f64))
         }),
     );
+    let histogram = |f: fn(&UpstreamSnapshot) -> &Histogram, bounds: &[f64]| {
+        ups.iter()
+            .flat_map(|u| {
+                let (h, l) = (f(u), labels(u));
+                let mut cumulative = 0;
+                let les = bounds.iter().map(f64::to_string).chain(["+Inf".into()]);
+                les.zip(h.buckets)
+                    .map(|(le, n)| {
+                        cumulative += n;
+                        (format!("_bucket{{{l},le=\"{le}\"}}"), cumulative as f64)
+                    })
+                    .chain([
+                        (format!("_sum{{{l}}}"), h.sum),
+                        (format!("_count{{{l}}}"), h.count as f64),
+                    ])
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+    };
     family(
         &mut out,
         "sito_upstream_narinfo_seconds",
-        "summary",
+        "histogram",
         "Narinfo latency on real traffic, request to response headers.",
-        ups.iter().flat_map(|u| {
-            [
-                (format!("_sum{{{}}}", labels(u)), u.narinfo_secs_total),
-                (format!("_count{{{}}}", labels(u)), u.narinfo_hits as f64),
-            ]
-        }),
+        histogram(|u| &u.narinfo_secs, &NARINFO_SECS_BOUNDS),
+    );
+    family(
+        &mut out,
+        "sito_upstream_nar_bytes_per_second",
+        "histogram",
+        "Throughput of completed NAR transfers.",
+        histogram(|u| &u.nar_bytes_per_sec, &NAR_BYTES_PER_SEC_BOUNDS),
     );
     family(
         &mut out,
@@ -503,12 +526,15 @@ const SLOW_NAR_MBYTES_PER_SEC: f64 = 1.0;
 const SLOW_NAR_MIN_SECS: f64 = 30.0;
 
 /// Counts NAR bytes on the way through, records throughput once the body
-/// completes, and reports how a transfer ended when it did not end well.
+/// completes, and logs one line per transfer saying how it ended.
 ///
 /// A transfer ends one of three ways, told apart on drop:
 ///
-/// - **EOF** — the body completed. Throughput feeds the EWMA, and a transfer
-///   that was long and slow is logged as a warning.
+/// - **EOF** — the body completed. Throughput feeds the EWMA and the
+///   histogram, and the transfer is logged at info with its size, duration
+///   and rate — at warn instead if it was long and slow. Narinfo lookups get
+///   no such line: a build makes thousands of them, and their latency is in
+///   the histogram.
 /// - **Upstream read error** — including the idle timeout. Counted as an
 ///   upstream error and the upstream is marked down and the prober kicked,
 ///   exactly like a failed request: an upstream that stalls mid-body is as
@@ -580,13 +606,24 @@ impl Drop for MeteredReader {
         if self.eof && secs > 0.0 && self.bytes > 0 {
             let rate = self.bytes as f64 / 1e6 / secs;
             self.registry.record_nar_throughput(self.idx, rate);
-            if secs >= SLOW_NAR_MIN_SECS && rate < SLOW_NAR_MBYTES_PER_SEC {
+            let slow = secs >= SLOW_NAR_MIN_SECS && rate < SLOW_NAR_MBYTES_PER_SEC;
+            let round = |v: f64| (v * 100.0).round() / 100.0;
+            let (secs, mbytes_per_sec) = (round(secs), round(rate));
+            if slow {
                 tracing::warn!(
                     url = self.url,
                     bytes = self.bytes,
-                    secs = secs as u64,
-                    mbytes_per_sec = format!("{rate:.2}"),
+                    secs,
+                    mbytes_per_sec,
                     "slow NAR transfer"
+                );
+            } else {
+                tracing::info!(
+                    url = self.url,
+                    bytes = self.bytes,
+                    secs,
+                    mbytes_per_sec,
+                    "NAR transfer done"
                 );
             }
         } else if !self.eof && !self.failed {

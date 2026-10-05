@@ -36,6 +36,42 @@ fn ewma(prev: Option<f64>, x: f64) -> f64 {
     }
 }
 
+/// Narinfo latency histogram bounds, in seconds: a LAN cache answers in a few
+/// milliseconds, a distant one in tens to hundreds.
+pub const NARINFO_SECS_BOUNDS: [f64; HISTOGRAM_BOUNDS] =
+    [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5];
+
+/// NAR throughput histogram bounds, in bytes per second: from a stalling
+/// remote link up to a fast LAN.
+pub const NAR_BYTES_PER_SEC_BOUNDS: [f64; HISTOGRAM_BOUNDS] =
+    [0.5e6, 1e6, 2e6, 5e6, 10e6, 20e6, 50e6, 100e6];
+
+pub const HISTOGRAM_BOUNDS: usize = 8;
+
+/// Fixed-bucket histogram over one of the bound sets above, which the caller
+/// passes in, so the struct stays `Copy` and snapshots stay cheap.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Histogram {
+    /// Per-bucket counts, not cumulative: slot `i` holds samples above bound
+    /// `i - 1` and at most bound `i`; the last slot holds everything above
+    /// the top bound.
+    pub buckets: [u64; HISTOGRAM_BOUNDS + 1],
+    pub sum: f64,
+    pub count: u64,
+}
+
+impl Histogram {
+    fn observe(&mut self, bounds: &[f64; HISTOGRAM_BOUNDS], v: f64) {
+        let slot = bounds
+            .iter()
+            .position(|&b| v <= b)
+            .unwrap_or(HISTOGRAM_BOUNDS);
+        self.buckets[slot] += 1;
+        self.sum += v;
+        self.count += 1;
+    }
+}
+
 /// Serializable view of one upstream, as fed to the selection engine and
 /// dumped by `/status`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -70,12 +106,15 @@ pub struct UpstreamSnapshot {
     /// Transport failures (connect, TLS, timeout, non-404 status). Each one
     /// also marks the upstream unhealthy.
     pub errors: u64,
-    /// Narinfos served; the narinfo share of `hits`.
-    pub narinfo_hits: u64,
-    /// Sum of narinfo latencies in seconds, the raw total behind
-    /// `narinfo_ms`. Together with `narinfo_hits` it gives an exact mean over
-    /// any time window, which an EWMA sampled at scrape time cannot.
-    pub narinfo_secs_total: f64,
+    /// Narinfo latency in seconds, over [`NARINFO_SECS_BOUNDS`]. Unlike the
+    /// EWMA, it keeps every request between two scrapes, so a build that
+    /// fits inside one scrape interval still shows its slow lookups.
+    #[serde(skip)]
+    pub narinfo_secs: Histogram,
+    /// Completed NAR transfer throughput in bytes per second, over
+    /// [`NAR_BYTES_PER_SEC_BOUNDS`].
+    #[serde(skip)]
+    pub nar_bytes_per_sec: Histogram,
     /// NAR body bytes passed to clients, counted as they flow, so transfers
     /// that broke off or were abandoned count too.
     pub nar_bytes: u64,
@@ -162,8 +201,7 @@ impl Registry {
     pub fn record_narinfo_hit(&self, index: usize, ms: f64) {
         self.with(index, |u| {
             u.hits += 1;
-            u.narinfo_hits += 1;
-            u.narinfo_secs_total += ms / 1000.0;
+            u.narinfo_secs.observe(&NARINFO_SECS_BOUNDS, ms / 1000.0);
             u.narinfo_ms = Some(ewma(u.narinfo_ms, ms));
         });
     }
@@ -178,7 +216,9 @@ impl Registry {
     /// body. Hit counting is separate: this is only the speed signal.
     pub fn record_nar_throughput(&self, index: usize, mbytes_per_sec: f64) {
         self.with(index, |u| {
-            u.nar_mbytes_per_sec = Some(ewma(u.nar_mbytes_per_sec, mbytes_per_sec))
+            u.nar_mbytes_per_sec = Some(ewma(u.nar_mbytes_per_sec, mbytes_per_sec));
+            u.nar_bytes_per_sec
+                .observe(&NAR_BYTES_PER_SEC_BOUNDS, mbytes_per_sec * 1e6);
         });
     }
 
@@ -242,6 +282,16 @@ mod tests {
         assert_eq!(ewma(None, 10.0), 10.0);
         let second = ewma(Some(10.0), 20.0);
         assert!(second > 10.0 && second < 20.0);
+    }
+
+    #[test]
+    fn histogram_buckets_by_upper_bound() {
+        let mut h = Histogram::default();
+        for v in [0.001, 0.01, 0.011, 99.0] {
+            h.observe(&NARINFO_SECS_BOUNDS, v);
+        }
+        assert_eq!(h.buckets, [2, 1, 0, 0, 0, 0, 0, 0, 1]);
+        assert_eq!(h.count, 4);
     }
 
     #[test]

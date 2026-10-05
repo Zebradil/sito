@@ -143,8 +143,9 @@ on disk and are sent with their original timestamps once it is back, so a laptop
 The daemon is `org.nixos.sito-vmagent`, logging to `/var/log/sito-vmagent.log`. Its own status pages listen on
 `127.0.0.1:8429` only. The scrape config is checked with `vmagent -dryRun` when the system is built.
 
-sito's series take about 6 MB a day at the default 30 s interval with four upstreams (an estimate, measured on a smaller
-setup and scaled), so the default 1GB cap holds months offline. The store must keep data at least as long as the
+With four upstreams sito exposes about 120 series. vmagent queued them at 2.2 KB per scrape in a measured run, about
+19 MB a day at the default 10 s interval, so the default 1GB cap holds about seven weeks offline. Each upstream adds
+about 30 series. The store must keep data at least as long as the
 longest offline stretch: VictoriaMetrics drops samples older than its `-retentionPeriod` on arrival.
 
 NixOS has its own `services.vmagent` module; point a scrape job at sito's listen address there instead.
@@ -162,7 +163,7 @@ NixOS has its own `services.vmagent` module; point a scrape job at sito's listen
 | `logLevel` | `"sito=info"` | `RUST_LOG` filter for the daemon. |
 | `vmagent.enable` | `false` | nix-darwin only. Run vmagent to remote-write sito's metrics, buffered on disk while offline. |
 | `vmagent.remoteWriteUrl` | none | Remote write endpoint, for example VictoriaMetrics' `/api/v1/write`. |
-| `vmagent.scrapeInterval` | `"30s"` | How often vmagent scrapes sito. |
+| `vmagent.scrapeInterval` | `"10s"` | How often vmagent scrapes sito. |
 | `vmagent.maxDiskUsage` | `"1GB"` | Cap on the on-disk queue; past it the oldest samples are dropped. |
 | `vmagent.dataDir` | `"/var/lib/sito-vmagent"` | Where unsent samples wait. |
 | `vmagent.extraArgs` | `[]` | Extra vmagent flags: labels, remote-write credentials. |
