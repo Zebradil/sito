@@ -1,0 +1,44 @@
+# yaml-language-server: $schema=node_modules/@zebradil/starlight-kit/schema/site.schema.json
+name: sito
+tagline: A local always-on Nix substituter proxy for roaming clients.
+repo: https://github.com/Zebradil/sito
+theme: default
+eyebrow: Nix substituter proxy # guessed: category label condensed from the README title line
+description: >- # guessed: README opening paragraph, shortened to fit the 400-char limit
+  Nix is configured with a single substituter, `http://localhost:5001`, and sito
+  routes every narinfo/NAR request to the best reachable upstream binary cache:
+  no substituter-list editing and no connect-timeout tax.
+install:
+  - label: Nix
+    code: nix profile install github:Zebradil/sito # guessed: flake has packages.default; README documents the flake input only, command not run
+  - label: Cargo
+    code: cargo install --git https://github.com/Zebradil/sito # guessed: crate not on crates.io; command not run
+features:
+  - title: One substituter, many caches # guessed: condensed from README intro
+    body: Nix talks to one localhost endpoint; sito streams each narinfo/NAR request from the best reachable upstream, with no cache of its own.
+  - title: Ordered tiers # guessed: condensed from README "Shape"
+    body: Upstreams are grouped in ordered tiers, each with a selection strategy; the first tier that produces a hit wins.
+  - title: Ranking from real traffic # guessed: condensed from README "Shape" and src/probe.rs
+    body: Upstreams are ranked from passive traffic metrics plus timed `/nix-cache-info` reachability probes.
+  - title: Trust stays in Nix # guessed: condensed from README "Shape"
+    body: Narinfos pass through unmodified and sito holds no keys; the Nix client verifies signatures as before.
+  - title: Inspectable ranking # guessed: condensed from README "Shape"
+    body: A `/status` JSON endpoint exposes what the ranker sees for every upstream.
+  - title: NixOS and nix-darwin modules # guessed: condensed from README module section
+    body: Modules run the daemon and point `nix.settings.substituters` at sito, trusting every upstream's public keys.
+components:
+  items:
+    - name: sito
+      body: The proxy daemon, configured from a TOML file.
+    - name: nixosModules.default
+      body: Runs sito as a NixOS service (`services.sito`).
+    - name: darwinModules.default
+      body: Runs sito as a nix-darwin service (`services.sito`).
+links:
+  - label: Changelog
+    href: https://github.com/Zebradil/sito/blob/main/CHANGELOG.md
+reference:
+  cli:
+    bin: sito
+    build: cargo build --release
+    path: target/release/sito
