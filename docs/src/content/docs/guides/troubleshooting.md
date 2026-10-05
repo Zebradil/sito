@@ -48,7 +48,7 @@ These warnings appear at the default level:
 | `NAR upstream read failed` | A NAR body broke off or sent nothing for 60 s. The upstream is marked down. Before the first byte, sito tries the next upstream; after it, Nix gets a short body and fails that download. |
 | `slow NAR transfer` | A NAR completed but took 30 s or more at under 1 MB/s. Logged in place of `NAR transfer done`. |
 | `all NAR slots busy, waiting` | A NAR request waited 5 s for one of the `max-inflight` slots. |
-| `accept failed` | The listener could not accept a connection. After 100 failures in a row sito exits. |
+| `Error: listener failed` | The listener could not accept a connection, most often because sito ran out of file descriptors. The listener is gone after one failure, so sito exits and launchd or systemd restarts it. |
 
 `NAR transfer abandoned by client`, at info, means Nix hung up first. Nothing is recorded against the upstream.
 

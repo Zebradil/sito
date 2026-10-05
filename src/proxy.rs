@@ -5,7 +5,7 @@ use std::io::Read;
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use tiny_http::{Header, Method, Request, Response, Server};
 
 use crate::probe::Prober;
@@ -45,11 +45,6 @@ pub struct TierShape {
     pub indices: Vec<usize>,
 }
 
-/// Consecutive accept failures tolerated before [`serve`] gives up. A
-/// transient failure (fd exhaustion under load) recovers well inside this;
-/// a listener that is actually dead trips it in ten seconds.
-const MAX_ACCEPT_FAILURES: u32 = 100;
-
 /// Serve until the listener dies, one thread per request.
 ///
 /// The loop itself never waits on anything but `recv`: the concurrency cap
@@ -58,25 +53,14 @@ const MAX_ACCEPT_FAILURES: u32 = 100;
 /// being dispatched.
 ///
 /// Blocks the calling thread and, in normal operation, never returns. The one
-/// exit is `MAX_ACCEPT_FAILURES` accept failures in a row, which means the
-/// listener is gone and no future request can arrive. Failure to *spawn* a
-/// handler is not fatal: that request is shed and the loop carries on.
+/// exit is an accept failure: tiny_http's accept thread hands over that error
+/// and then stops, closing the listener, so `recv` would block forever on a
+/// port nobody can reach. Returning lets launchd or systemd restart sito.
+/// Failure to *spawn* a handler is not fatal: that request is shed and the
+/// loop carries on.
 pub fn serve(app: Arc<App>, server: Server) -> Result<()> {
-    let mut failures = 0u32;
     loop {
-        let req = match server.recv() {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!(error = %e, "accept failed");
-                failures += 1;
-                if failures >= MAX_ACCEPT_FAILURES {
-                    anyhow::bail!("listener failed {failures} times in a row: {e}");
-                }
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                continue;
-            }
-        };
-        failures = 0;
+        let req = server.recv().context("listener failed")?;
         let app = app.clone();
         let spawned = std::thread::Builder::new()
             .stack_size(512 * 1024)
