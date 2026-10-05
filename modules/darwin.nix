@@ -118,6 +118,10 @@ in
         # is lost. journald covers the NixOS module; only darwin needs this.
         StandardOutPath = "/var/log/sito.log";
         StandardErrorPath = "/var/log/sito.log";
+        # launchd's default of 256 runs out when Nix fires a burst of
+        # narinfo lookups, one thread and socket pair each, for example right
+        # after wake while DNS is still down. An accept failure ends sito.
+        SoftResourceLimits.NumberOfFiles = 4096;
       };
     };
 
