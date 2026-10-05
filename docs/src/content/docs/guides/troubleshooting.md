@@ -4,7 +4,7 @@ description: Read sito's logs and /status to find out why Nix fetched from the w
 ---
 
 sito exposes two things for diagnosis: its log, and a `/status` endpoint with the numbers it ranks upstreams on. This
-guide shows how to read both, how to graph the same numbers through `/metrics`, then goes through common symptoms.
+guide shows how to read both, then goes through common symptoms.
 
 ## Prerequisites
 
@@ -89,36 +89,8 @@ The shape of `/status` is diagnostics for people, not a stable API.
 
 ## 4. Graph it over time
 
-`/metrics` serves the same numbers in the Prometheus text format, for Prometheus, vmagent or any compatible scraper.
-Metric names are kept stable, unlike the `/status` shape. sito keeps no history itself, so trends need a scraper.
-
-```sh
-curl -s http://127.0.0.1:5001/metrics
-```
-
-| Metric | Type | Meaning |
-| --- | --- | --- |
-| `sito_uptime_seconds` | gauge | Seconds since sito started. |
-| `sito_affinity_entries` | gauge | As `affinity_entries` in `/status`. |
-| `sito_nar_slots_used`, `sito_nar_slots_max` | gauge | As `nar_slots` in `/status`. |
-| `sito_upstream_healthy` | gauge | `1` or `0`; absent until the first probe answers. |
-| `sito_upstream_requests_total` | counter | Requests per upstream, by `result`: `hit`, `miss` or `error`. |
-| `sito_upstream_narinfo_seconds` | histogram | Narinfo latency, request to response headers. Buckets from 10 ms to 2.5 s. |
-| `sito_upstream_nar_bytes_per_second` | histogram | Throughput of completed NAR transfers. Buckets from 0.5 MB/s to 100 MB/s. |
-| `sito_upstream_nar_bytes_total` | counter | NAR body bytes passed to clients. |
-| `sito_upstream_probe_ewma_seconds` | gauge | `probe_ms`, in seconds. |
-| `sito_upstream_narinfo_ewma_seconds` | gauge | `narinfo_ms`, in seconds. |
-| `sito_upstream_nar_ewma_bytes_per_second` | gauge | `nar_mbytes_per_sec`, in bytes per second. |
-
-Per-upstream metrics carry `url` and `tier` labels. An EWMA gauge is absent until its first sample. Counters reset when
-sito restarts, which `rate()` and `increase()` absorb.
-
-The EWMA gauges show what the ranker sees at scrape time. The histograms and counters keep every request between two
-scrapes, so a build shorter than the scrape interval still shows in full. For latency over a window, use the histogram:
-
-```promql
-histogram_quantile(0.95, sum by (url, le) (rate(sito_upstream_narinfo_seconds_bucket[5m])))
-```
+`/status` shows only the present. To see how upstreams behaved across builds and networks, ship `/metrics` to a
+metrics store: [Monitor sito over time](../monitoring/).
 
 ## Symptoms
 
