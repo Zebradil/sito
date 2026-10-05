@@ -114,14 +114,20 @@ The store decides how old a sample it accepts, and a sample it refuses is lost:
 
 ## 3. Check that samples arrive
 
-On the machine, vmagent's own metrics say whether the queue drains:
+On the machine, vmagent's own pages say whether it scrapes sito and whether the queue drains:
 
 ```sh
-curl -s http://127.0.0.1:8429/metrics | grep -E '^vmagent_remotewrite_(pending_data_bytes|requests_total)'
+curl -s http://127.0.0.1:8429/targets
+curl -s http://127.0.0.1:8429/metrics | grep -E '^vmagent_remotewrite_(pending_data_bytes|requests_total|errors_total)'
 ```
 
-`vmagent_remotewrite_pending_data_bytes` grows while the store is out of reach and falls back once it answers. On the
-store, query `sito_uptime_seconds`; it should be there for every host label you set.
+`/targets` should list the sito target as `up`; scraping works even while the store is unreachable.
+`vmagent_remotewrite_pending_data_bytes` grows while the store is out of reach and falls back once it answers.
+`vmagent_remotewrite_requests_total{status_code="2XX"}` counts delivered blocks, so `0` means nothing has arrived yet,
+and a rising `vmagent_remotewrite_errors_total` means sends are attempted and fail. The vmagent log names the reason
+for each failure in a `couldn't send a block` warning, such as a dial timeout or an HTTP status from the store.
+
+On the store, query `sito_uptime_seconds`; it should be there for every host label you set.
 
 VictoriaMetrics shows a sample in queries about 30 s after it arrives (`-search.latencyOffset`). Backfilled samples
 appear in queries within seconds of arriving, cached ranges included.
