@@ -97,6 +97,7 @@
           fmt = mkCargoLintCheck pkgs "fmt" "cargo fmt --all -- --check";
           clippy = mkCargoLintCheck pkgs "clippy" "cargo clippy --all-targets --all-features -- -D warnings";
           module-tiers = import ./tests/module.nix { inherit self pkgs; };
+          module-darwin = import ./tests/darwin-module.nix { inherit self pkgs; };
         }
       );
 

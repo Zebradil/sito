@@ -123,6 +123,32 @@ would touch a live daemon. The unit name, label, and log path come from evaluati
 Then confirm sito answers: `curl -s http://127.0.0.1:5001/status`. [Troubleshoot sito](../troubleshooting/) explains
 the output.
 
+## 5. Ship metrics off a roaming Mac (nix-darwin, optional)
+
+sito keeps no history. On nix-darwin, `services.sito.vmagent` runs [vmagent](https://docs.victoriametrics.com/victoriametrics/vmagent/)
+next to it: vmagent scrapes sito's [`/metrics`](../troubleshooting/#4-graph-it-over-time) locally and remote-writes them
+to VictoriaMetrics, Prometheus or any store that accepts remote write. While the store is unreachable, samples queue
+on disk and are sent with their original timestamps once it is back, so a laptop away from home leaves no gaps.
+
+```nix
+{
+  services.sito.vmagent = {
+    enable = true;
+    remoteWriteUrl = "http://metrics.example.ts.net:8428/api/v1/write";
+    extraArgs = [ "-remoteWrite.label=host=laptop" ];
+  };
+}
+```
+
+The daemon is `org.nixos.sito-vmagent`, logging to `/var/log/sito-vmagent.log`. Its own status pages listen on
+`127.0.0.1:8429` only. The scrape config is checked with `vmagent -dryRun` when the system is built.
+
+sito's series take about 6 MB a day at the default 30 s interval with four upstreams (an estimate, measured on a smaller
+setup and scaled), so the default 1GB cap holds months offline. The store must keep data at least as long as the
+longest offline stretch: VictoriaMetrics drops samples older than its `-retentionPeriod` on arrival.
+
+NixOS has its own `services.vmagent` module; point a scrape job at sito's listen address there instead.
+
 ## Options
 
 | Option | Default | Meaning |
@@ -134,6 +160,13 @@ the output.
 | `manageSubstituters` | `true` | Point `nix.settings.substituters` at sito and trust every configured `public-keys` entry. |
 | `extraFallbackSubstituters` | `[]` | Substituters added after sito's own address, only while `manageSubstituters` is on. |
 | `logLevel` | `"sito=info"` | `RUST_LOG` filter for the daemon. |
+| `vmagent.enable` | `false` | nix-darwin only. Run vmagent to remote-write sito's metrics, buffered on disk while offline. |
+| `vmagent.remoteWriteUrl` | none | Remote write endpoint, for example VictoriaMetrics' `/api/v1/write`. |
+| `vmagent.scrapeInterval` | `"30s"` | How often vmagent scrapes sito. |
+| `vmagent.maxDiskUsage` | `"1GB"` | Cap on the on-disk queue; past it the oldest samples are dropped. |
+| `vmagent.dataDir` | `"/var/lib/sito-vmagent"` | Where unsent samples wait. |
+| `vmagent.extraArgs` | `[]` | Extra vmagent flags: labels, remote-write credentials. |
+| `vmagent.package` | `pkgs.vmagent` | vmagent build to run. |
 
 The NixOS service runs with `DynamicUser`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp` and `NoNewPrivileges`,
 starts after `network-online.target`, and restarts 2 s after any exit. The nix-darwin daemon runs with `KeepAlive` and
