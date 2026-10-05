@@ -23,6 +23,8 @@ The docs site, [zebradil.github.io/sito](https://zebradil.github.io/sito/), has:
   every `services.sito` option.
 - [Troubleshoot sito](https://zebradil.github.io/sito/guides/troubleshooting/) — logs, every `/status`
   field, symptom-to-cause list.
+- [Monitor sito over time](https://zebradil.github.io/sito/guides/monitoring/) — ship `/metrics` from a
+  roaming machine, every metric, queries worth a panel.
 - Concepts: [how sito picks an upstream](https://zebradil.github.io/sito/concepts/selection/),
   [trust model](https://zebradil.github.io/sito/concepts/trust/), [architecture](https://zebradil.github.io/sito/concepts/architecture/).
 
@@ -43,7 +45,7 @@ In this repository:
 - `/status` JSON endpoint exposes what the ranker sees
   ([field reference](https://zebradil.github.io/sito/guides/troubleshooting/#3-read-status)),
   and `/metrics` serves the same numbers to Prometheus-compatible scrapers
-  ([metric reference](https://zebradil.github.io/sito/guides/troubleshooting/#4-graph-it-over-time)).
+  ([monitoring guide](https://zebradil.github.io/sito/guides/monitoring/)).
 - Ships a nixosModule (`x86_64-linux`) and darwinModule (`aarch64-darwin`)
   that run the daemon and manage `substituters` / `trusted-public-keys` by
   default.
