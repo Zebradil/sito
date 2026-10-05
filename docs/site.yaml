@@ -2,7 +2,9 @@
 name: sito
 tagline: A local always-on Nix substituter proxy for roaming clients.
 repo: https://github.com/Zebradil/sito
-theme: default
+theme: sieve
+logo: { light: ./src/assets/logo.svg, dark: ./src/assets/logo-dark.svg }
+headline: One substituter. The fastest reachable cache.
 eyebrow: Nix substituter proxy # guessed: category label condensed from the README title line
 description: >- # guessed: README opening paragraph, shortened to fit the 400-char limit
   Nix is configured with a single substituter, `http://localhost:5001`, and sito
@@ -26,6 +28,38 @@ features:
     body: A `/status` JSON endpoint exposes what the ranker sees for every upstream.
   - title: NixOS and nix-darwin modules # guessed: condensed from README module section
     body: Modules run the daemon and point `nix.settings.substituters` at sito, trusting every upstream's public keys.
+cascade:
+  request: nix → GET /<hash>.narinfo → 127.0.0.1:5001
+  hub: { name: sito, body: Builds a selection plan from probe results and measured traffic. }
+  tiers:
+    - name: lan
+      label: tier 1 · sequential
+      backends:
+        - { id: box, name: "http://box.lan:5000" }
+        - { id: remote, name: "https://znix.zebradil.dev" }
+    - name: public
+      label: tier 2 · sequential
+      backends:
+        - { id: nixos, name: "https://cache.nixos.org" }
+  scenarios:
+    - label: Away
+      note: The box failed its last `GET /nix-cache-info` probe, so the plan never dials it and no connect timeout is paid. Back home, the next probe brings it back.
+      states:
+        box: { state: down, text: last probe timed out }
+        remote: { state: hit, text: narinfo relayed unmodified }
+        nixos: { state: idle, text: tier 1 hit }
+    - label: At home
+      note: On the LAN the box answers fastest, so it ranks first in its tier and the request never leaves the house.
+      states:
+        box: { state: hit, text: ranked first by latency }
+        remote: { state: idle, text: tier already hit }
+        nixos: { state: idle, text: tier 1 hit }
+    - label: Only upstream
+      note: Neither private cache has the path, so tier 1 misses and the request falls through to the public tier.
+      states:
+        box: { state: miss, text: "404" }
+        remote: { state: miss, text: "404" }
+        nixos: { state: hit, text: first hit in tier 2 }
 components:
   items:
     - name: sito
