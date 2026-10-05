@@ -38,7 +38,7 @@ fn ewma(prev: Option<f64>, x: f64) -> f64 {
 
 /// Serializable view of one upstream, as fed to the selection engine and
 /// dumped by `/status`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpstreamSnapshot {
     /// Index into the flat config-order upstream list; the id the selection
     /// plan speaks in.
@@ -70,6 +70,15 @@ pub struct UpstreamSnapshot {
     /// Transport failures (connect, TLS, timeout, non-404 status). Each one
     /// also marks the upstream unhealthy.
     pub errors: u64,
+    /// Narinfos served; the narinfo share of `hits`.
+    pub narinfo_hits: u64,
+    /// Sum of narinfo latencies in seconds, the raw total behind
+    /// `narinfo_ms`. Together with `narinfo_hits` it gives an exact mean over
+    /// any time window, which an EWMA sampled at scrape time cannot.
+    pub narinfo_secs_total: f64,
+    /// NAR body bytes passed to clients, counted as they flow, so transfers
+    /// that broke off or were abandoned count too.
+    pub nar_bytes: u64,
 }
 
 /// The single piece of shared mutable state, held behind mutexes and shared
@@ -104,13 +113,7 @@ impl Registry {
                     index: ups.len(),
                     url: url.clone(),
                     tier,
-                    healthy: None,
-                    probe_ms: None,
-                    narinfo_ms: None,
-                    nar_mbytes_per_sec: None,
-                    hits: 0,
-                    misses: 0,
-                    errors: 0,
+                    ..Default::default()
                 });
             }
         }
@@ -159,8 +162,15 @@ impl Registry {
     pub fn record_narinfo_hit(&self, index: usize, ms: f64) {
         self.with(index, |u| {
             u.hits += 1;
+            u.narinfo_hits += 1;
+            u.narinfo_secs_total += ms / 1000.0;
             u.narinfo_ms = Some(ewma(u.narinfo_ms, ms));
         });
+    }
+
+    /// NAR bytes on their way to a client.
+    pub fn record_nar_bytes(&self, index: usize, n: u64) {
+        self.with(index, |u| u.nar_bytes += n);
     }
 
     /// Fold a completed NAR transfer into the throughput EWMA. `mbytes_per_sec`

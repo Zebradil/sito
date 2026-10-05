@@ -23,12 +23,13 @@ Rationale: [ADR-0002](https://github.com/Zebradil/sito/blob/main/docs/adr/0002-s
 ## Routes
 
 sito speaks the read side of the [Nix binary cache protocol](https://nix.dev/manual/nix/latest/protocols/http-binary-cache),
-plus `/status`:
+plus `/status` and `/metrics`:
 
 | Route | Methods | Answered by |
 | --- | --- | --- |
 | `/nix-cache-info` | `GET`, `HEAD` | sito |
 | `/status` | `GET`, `HEAD` | sito |
+| `/metrics` | `GET`, `HEAD` | sito |
 | `*.narinfo` | `GET`, `HEAD` | an upstream, through the selection plan |
 | `/nar/*` | `GET`, `HEAD` | an upstream, through the selection plan |
 | anything else | `GET`, `HEAD` | sito: `404 not found` |

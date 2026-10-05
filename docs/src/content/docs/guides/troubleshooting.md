@@ -4,7 +4,7 @@ description: Read sito's logs and /status to find out why Nix fetched from the w
 ---
 
 sito exposes two things for diagnosis: its log, and a `/status` endpoint with the numbers it ranks upstreams on. This
-guide shows how to read both, then goes through common symptoms.
+guide shows how to read both, how to graph the same numbers through `/metrics`, then goes through common symptoms.
 
 ## Prerequisites
 
@@ -81,10 +81,44 @@ Per upstream:
 | `hits` | Requests this upstream answered, narinfo and NAR alike. |
 | `misses` | 404s: the upstream does not have the path. Routine for a small cache in front of a big one. |
 | `errors` | Failed requests, including NAR bodies that broke off. Each also sets `healthy` to `false` and starts a probe pass at once. |
+| `narinfo_hits` | Narinfos served: the narinfo share of `hits`. |
+| `narinfo_secs_total` | Sum of the narinfo latencies behind `narinfo_ms`, in seconds. |
+| `nar_bytes` | NAR body bytes passed to clients, including transfers that broke off. |
 
 The moving averages weigh the newest sample at 0.3, so a handful of requests is enough to reflect a network change.
 
 The shape of `/status` is diagnostics for people, not a stable API.
+
+## 4. Graph it over time
+
+`/metrics` serves the same numbers in the Prometheus text format, for Prometheus, vmagent or any compatible scraper.
+Metric names are kept stable, unlike the `/status` shape. sito keeps no history itself, so trends need a scraper.
+
+```sh
+curl -s http://127.0.0.1:5001/metrics
+```
+
+| Metric | Type | Meaning |
+| --- | --- | --- |
+| `sito_uptime_seconds` | gauge | Seconds since sito started. |
+| `sito_affinity_entries` | gauge | As `affinity_entries` in `/status`. |
+| `sito_nar_slots_used`, `sito_nar_slots_max` | gauge | As `nar_slots` in `/status`. |
+| `sito_upstream_healthy` | gauge | `1` or `0`; absent until the first probe answers. |
+| `sito_upstream_requests_total` | counter | Requests per upstream, by `result`: `hit`, `miss` or `error`. |
+| `sito_upstream_narinfo_seconds` | summary | `_sum` and `_count` of narinfo latency, request to response headers. |
+| `sito_upstream_nar_bytes_total` | counter | NAR body bytes passed to clients. |
+| `sito_upstream_probe_ewma_seconds` | gauge | `probe_ms`, in seconds. |
+| `sito_upstream_narinfo_ewma_seconds` | gauge | `narinfo_ms`, in seconds. |
+| `sito_upstream_nar_ewma_bytes_per_second` | gauge | `nar_mbytes_per_sec`, in bytes per second. |
+
+Per-upstream metrics carry `url` and `tier` labels. An EWMA gauge is absent until its first sample. Counters reset when
+sito restarts, which `rate()` and `increase()` absorb.
+
+The EWMA gauges show what the ranker sees at scrape time. For latency over a window, use the summary instead:
+
+```promql
+rate(sito_upstream_narinfo_seconds_sum[5m]) / rate(sito_upstream_narinfo_seconds_count[5m])
+```
 
 ## Symptoms
 

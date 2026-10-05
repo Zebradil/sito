@@ -144,6 +144,37 @@ fn nar_affinity_prefers_the_upstream_that_served_the_narinfo() {
     assert_eq!(status["affinity_entries"], 1);
 }
 
+#[test]
+fn metrics_expose_traffic_in_prometheus_text_format() {
+    let empty = mock_upstream(vec![]);
+    let full = mock_upstream(vec![
+        ("/abc.narinfo", NARINFO.as_bytes()),
+        ("/nar/deadbeef.nar.xz", NAR_BYTES),
+    ]);
+    let base = sito_at(&[empty.clone(), full.clone()]);
+    get(&format!("{base}/abc.narinfo")).unwrap();
+    get(&format!("{base}/nar/deadbeef.nar.xz")).unwrap();
+
+    let (code, body) = get(&format!("{base}/metrics")).unwrap();
+    assert_eq!(code, 200);
+    let text = String::from_utf8(body).unwrap();
+    for line in [
+        format!("sito_upstream_requests_total{{url=\"{empty}\",tier=\"0\",result=\"miss\"}} 1"),
+        format!("sito_upstream_requests_total{{url=\"{full}\",tier=\"1\",result=\"hit\"}} 2"),
+        format!("sito_upstream_narinfo_seconds_count{{url=\"{full}\",tier=\"1\"}} 1"),
+        format!(
+            "sito_upstream_nar_bytes_total{{url=\"{full}\",tier=\"1\"}} {}",
+            NAR_BYTES.len()
+        ),
+        "# TYPE sito_upstream_narinfo_seconds summary".into(),
+    ] {
+        assert!(
+            text.lines().any(|l| l == line),
+            "missing {line:?} in:\n{text}"
+        );
+    }
+}
+
 /// Mock upstream at the raw socket level: answers `/nix-cache-info` properly
 /// and every other request with `reply`, then closes the connection — a
 /// `Content-Length` larger than `reply` makes that a truncated body.

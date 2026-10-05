@@ -41,7 +41,9 @@ In this repository:
 - Trust stays in the Nix client: narinfos pass through unmodified, sito holds
   no keys.
 - `/status` JSON endpoint exposes what the ranker sees
-  ([field reference](https://zebradil.github.io/sito/guides/troubleshooting/#3-read-status)).
+  ([field reference](https://zebradil.github.io/sito/guides/troubleshooting/#3-read-status)),
+  and `/metrics` serves the same numbers to Prometheus-compatible scrapers
+  ([metric reference](https://zebradil.github.io/sito/guides/troubleshooting/#4-graph-it-over-time)).
 - Ships a nixosModule (`x86_64-linux`) and darwinModule (`aarch64-darwin`)
   that run the daemon and manage `substituters` / `trusted-public-keys` by
   default.

@@ -114,13 +114,7 @@ mod tests {
             index,
             url: format!("http://u{index}"),
             tier,
-            healthy: None,
-            probe_ms: None,
-            narinfo_ms: None,
-            nar_mbytes_per_sec: None,
-            hits: 0,
-            misses: 0,
-            errors: 0,
+            ..Default::default()
         }
     }
 

@@ -11,8 +11,6 @@ Deferred by design (see `docs/adr/`):
   an idle gap; decide during implementation (ADR-0004).
 - **Rank-state persistence** — only if cold start measurably misroutes
   (ADR-0004).
-- **Prometheus metrics** — `/status` JSON suffices until a dashboard exists to
-  consume more.
 - **OS network-change events** (SCNetworkReachability/netlink) — only if the
   probe interval provably annoys (ADR-0004).
 - **Push proxying** (`nix copy --to` through sito) — writing is not sito's
