@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/Zebradil/sito/compare/v0.2.1...v0.3.0) (2026-10-05)
+
+
+### Features
+
+* Prometheus /metrics, histograms and darwin vmagent shipping ([#30](https://github.com/Zebradil/sito/issues/30)) ([11ec93e](https://github.com/Zebradil/sito/commit/11ec93ecb4c21049a32843ea209008fe1a923ea0))
+
 ## [0.2.1](https://github.com/Zebradil/sito/compare/v0.2.0...v0.2.1) (2026-10-05)
 
 
