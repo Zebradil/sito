@@ -33,6 +33,5 @@ Deferred by design (see `docs/adr/`):
 
 ## Docs
 
-- onboard docs-kit
 - add comparison with ncro (see ./ncro-cmp.md)
 - pull improvement suggestions from ./ncro-cmp.md
