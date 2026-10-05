@@ -123,6 +123,12 @@ would touch a live daemon. The unit name, label, and log path come from evaluati
 Then confirm sito answers: `curl -s http://127.0.0.1:5001/status`. [Troubleshoot sito](../troubleshooting/) explains
 the output.
 
+## 5. Ship metrics (optional)
+
+On nix-darwin, `services.sito.vmagent` runs vmagent next to sito to keep its metrics in VictoriaMetrics or Prometheus,
+with an on-disk queue for time away from the store. On NixOS, the stock `services.vmagent` does the same job. Both are
+covered in [Monitor sito over time](../monitoring/).
+
 ## Options
 
 | Option | Default | Meaning |
@@ -134,6 +140,7 @@ the output.
 | `manageSubstituters` | `true` | Point `nix.settings.substituters` at sito and trust every configured `public-keys` entry. |
 | `extraFallbackSubstituters` | `[]` | Substituters added after sito's own address, only while `manageSubstituters` is on. |
 | `logLevel` | `"sito=info"` | `RUST_LOG` filter for the daemon. |
+| `vmagent.*` | | nix-darwin only; see [Monitor sito over time](../monitoring/#nix-darwin). |
 
 The NixOS service runs with `DynamicUser`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp` and `NoNewPrivileges`,
 starts after `network-online.target`, and restarts 2 s after any exit. The nix-darwin daemon runs with `KeepAlive` and

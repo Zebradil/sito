@@ -25,7 +25,7 @@ features:
   - title: Trust stays in Nix # guessed: condensed from README "Shape"
     body: Narinfos pass through unmodified and sito holds no keys; the Nix client verifies signatures as before.
   - title: Inspectable ranking # guessed: condensed from README "Shape"
-    body: A `/status` JSON endpoint exposes what the ranker sees for every upstream.
+    body: A `/status` JSON endpoint exposes what the ranker sees for every upstream, and `/metrics` keeps it graphable over time, even from a roaming laptop.
   - title: NixOS and nix-darwin modules # guessed: condensed from README module section
     body: Modules run the daemon and point `nix.settings.substituters` at sito, trusting every upstream's public keys.
 cascade:

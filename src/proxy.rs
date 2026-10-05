@@ -1,16 +1,18 @@
 //! HTTP surface: streaming pass-through proxy (ADR-0002), read-only, plus
-//! sito's own `/nix-cache-info` and `/status`.
+//! sito's own `/nix-cache-info`, `/status` and `/metrics`.
 
 use std::io::Read;
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use tiny_http::{Header, Method, Request, Response, Server};
 
 use crate::probe::Prober;
 use crate::select::{Plan, RequestKind, SelectionEngine, SelectionInput, TierInput};
-use crate::state::Registry;
+use crate::state::{
+    Histogram, NAR_BYTES_PER_SEC_BOUNDS, NARINFO_SECS_BOUNDS, Registry, UpstreamSnapshot,
+};
 
 /// Everything a request thread needs, shared immutably behind an `Arc`. The
 /// only mutable state is inside [`Registry`], which does its own locking.
@@ -43,11 +45,6 @@ pub struct TierShape {
     pub indices: Vec<usize>,
 }
 
-/// Consecutive accept failures tolerated before [`serve`] gives up. A
-/// transient failure (fd exhaustion under load) recovers well inside this;
-/// a listener that is actually dead trips it in ten seconds.
-const MAX_ACCEPT_FAILURES: u32 = 100;
-
 /// Serve until the listener dies, one thread per request.
 ///
 /// The loop itself never waits on anything but `recv`: the concurrency cap
@@ -56,25 +53,14 @@ const MAX_ACCEPT_FAILURES: u32 = 100;
 /// being dispatched.
 ///
 /// Blocks the calling thread and, in normal operation, never returns. The one
-/// exit is `MAX_ACCEPT_FAILURES` accept failures in a row, which means the
-/// listener is gone and no future request can arrive. Failure to *spawn* a
-/// handler is not fatal: that request is shed and the loop carries on.
+/// exit is an accept failure: tiny_http's accept thread hands over that error
+/// and then stops, closing the listener, so `recv` would block forever on a
+/// port nobody can reach. Returning lets launchd or systemd restart sito.
+/// Failure to *spawn* a handler is not fatal: that request is shed and the
+/// loop carries on.
 pub fn serve(app: Arc<App>, server: Server) -> Result<()> {
-    let mut failures = 0u32;
     loop {
-        let req = match server.recv() {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!(error = %e, "accept failed");
-                failures += 1;
-                if failures >= MAX_ACCEPT_FAILURES {
-                    anyhow::bail!("listener failed {failures} times in a row: {e}");
-                }
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                continue;
-            }
-        };
-        failures = 0;
+        let req = server.recv().context("listener failed")?;
         let app = app.clone();
         let spawned = std::thread::Builder::new()
             .stack_size(512 * 1024)
@@ -87,9 +73,10 @@ pub fn serve(app: Arc<App>, server: Server) -> Result<()> {
 
 /// The whole route table.
 ///
-/// sito answers two paths itself: `/nix-cache-info`, authored locally because
-/// the upstreams' own priorities and store dirs are none of the client's
-/// business (ADR-0006), and `/status`, a JSON dump of live state. `*.narinfo`
+/// sito answers three paths itself: `/nix-cache-info`, authored locally
+/// because the upstreams' own priorities and store dirs are none of the
+/// client's business (ADR-0006), `/status`, a JSON dump of live state, and
+/// `/metrics`, the same state for Prometheus-compatible scrapers. `*.narinfo`
 /// and `/nar/*` are forwarded to upstreams. Everything else is 404.
 ///
 /// Status codes sito emits on its own behalf: 404 for an unrecognised path,
@@ -104,6 +91,7 @@ fn handle(app: &App, req: Request) {
             Response::from_string("StoreDir: /nix/store\nWantMassQuery: 1\nPriority: 10\n"),
         ),
         (Method::Get | Method::Head, "/status") => status(app, req),
+        (Method::Get | Method::Head, "/metrics") => metrics(app, req),
         (Method::Get | Method::Head, p) if p.ends_with(".narinfo") => {
             forward(app, req, RequestKind::Narinfo)
         }
@@ -129,6 +117,159 @@ fn status(app: &App, req: Request) {
     let mut resp = Response::from_string(body.to_string());
     resp.add_header(header("Content-Type", "application/json"));
     respond(req, resp);
+}
+
+/// `/metrics`: the `/status` numbers in the Prometheus text exposition format,
+/// for a scraper such as vmagent that keeps the history sito does not.
+///
+/// Unlike `/status`, metric names are meant to stay stable, since dashboards
+/// and alerts are written against them. Upstreams are labelled by `url` and
+/// `tier`. `healthy` is omitted until the first probe answers, and each EWMA
+/// until its first sample, so "unknown" never reads as 0. Counters reset on
+/// restart, which `rate()` handles.
+fn metrics(app: &App, req: Request) {
+    let ups = app.registry.snapshot();
+    let mut out = String::new();
+    let gauge = |out: &mut String, name, help, v: f64| {
+        family(out, name, "gauge", help, [(String::new(), v)])
+    };
+    gauge(
+        &mut out,
+        "sito_uptime_seconds",
+        "Seconds since sito started.",
+        app.registry.started.elapsed().as_secs_f64(),
+    );
+    gauge(
+        &mut out,
+        "sito_affinity_entries",
+        "NAR paths remembered with the upstream that served their narinfo.",
+        app.registry.affinity_len() as f64,
+    );
+    gauge(
+        &mut out,
+        "sito_nar_slots_used",
+        "NAR transfers in flight.",
+        app.nar_slots.used() as f64,
+    );
+    gauge(
+        &mut out,
+        "sito_nar_slots_max",
+        "The max-inflight cap on NAR transfers.",
+        app.nar_slots.max as f64,
+    );
+
+    let labels = |u: &UpstreamSnapshot| format!("url=\"{}\",tier=\"{}\"", escape(&u.url), u.tier);
+    let per = |f: fn(&UpstreamSnapshot) -> Option<f64>| {
+        ups.iter()
+            .filter_map(|u| f(u).map(|v| (format!("{{{}}}", labels(u)), v)))
+            .collect::<Vec<_>>()
+    };
+    family(
+        &mut out,
+        "sito_upstream_healthy",
+        "gauge",
+        "1 after a successful probe, 0 after a failed probe or request.",
+        per(|u| u.healthy.map(|h| h as u8 as f64)),
+    );
+    family(
+        &mut out,
+        "sito_upstream_requests_total",
+        "counter",
+        "Requests answered by an upstream, by result: hit, miss (404) or error.",
+        ups.iter().flat_map(|u| {
+            [("hit", u.hits), ("miss", u.misses), ("error", u.errors)]
+                .map(|(result, n)| (format!("{{{},result=\"{result}\"}}", labels(u)), n as f64))
+        }),
+    );
+    let histogram = |f: fn(&UpstreamSnapshot) -> &Histogram, bounds: &[f64]| {
+        ups.iter()
+            .flat_map(|u| {
+                let (h, l) = (f(u), labels(u));
+                let mut cumulative = 0;
+                let les = bounds.iter().map(f64::to_string).chain(["+Inf".into()]);
+                les.zip(h.buckets)
+                    .map(|(le, n)| {
+                        cumulative += n;
+                        (format!("_bucket{{{l},le=\"{le}\"}}"), cumulative as f64)
+                    })
+                    .chain([
+                        (format!("_sum{{{l}}}"), h.sum),
+                        (format!("_count{{{l}}}"), h.count as f64),
+                    ])
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+    };
+    family(
+        &mut out,
+        "sito_upstream_narinfo_seconds",
+        "histogram",
+        "Narinfo latency on real traffic, request to response headers.",
+        histogram(|u| &u.narinfo_secs, &NARINFO_SECS_BOUNDS),
+    );
+    family(
+        &mut out,
+        "sito_upstream_nar_bytes_per_second",
+        "histogram",
+        "Throughput of completed NAR transfers.",
+        histogram(|u| &u.nar_bytes_per_sec, &NAR_BYTES_PER_SEC_BOUNDS),
+    );
+    family(
+        &mut out,
+        "sito_upstream_nar_bytes_total",
+        "counter",
+        "NAR body bytes passed to clients.",
+        per(|u| Some(u.nar_bytes as f64)),
+    );
+    family(
+        &mut out,
+        "sito_upstream_probe_ewma_seconds",
+        "gauge",
+        "Moving average of the probe round trip, as ranked on.",
+        per(|u| u.probe_ms.map(|ms| ms / 1000.0)),
+    );
+    family(
+        &mut out,
+        "sito_upstream_narinfo_ewma_seconds",
+        "gauge",
+        "Moving average of narinfo latency, as ranked on.",
+        per(|u| u.narinfo_ms.map(|ms| ms / 1000.0)),
+    );
+    family(
+        &mut out,
+        "sito_upstream_nar_ewma_bytes_per_second",
+        "gauge",
+        "Moving average of completed NAR transfer throughput.",
+        per(|u| u.nar_mbytes_per_sec.map(|m| m * 1e6)),
+    );
+
+    let mut resp = Response::from_string(out);
+    resp.add_header(header("Content-Type", "text/plain; version=0.0.4"));
+    respond(req, resp);
+}
+
+/// Append one metric family: its HELP and TYPE lines, then one sample per
+/// `(tail, value)`, where the tail follows the family name: an optional
+/// suffix such as `_sum`, then the label set as `{...}`, either may be empty.
+fn family(
+    out: &mut String,
+    name: &str,
+    kind: &str,
+    help: &str,
+    samples: impl IntoIterator<Item = (String, f64)>,
+) {
+    use std::fmt::Write;
+    let _ = writeln!(out, "# HELP {name} {help}\n# TYPE {name} {kind}");
+    for (tail, v) in samples {
+        let _ = writeln!(out, "{name}{tail} {v}");
+    }
+}
+
+/// Escape a label value for the text exposition format.
+fn escape(v: &str) -> String {
+    v.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
 }
 
 /// Assemble the engine's input from one registry snapshot, so every tier in
@@ -369,12 +510,15 @@ const SLOW_NAR_MBYTES_PER_SEC: f64 = 1.0;
 const SLOW_NAR_MIN_SECS: f64 = 30.0;
 
 /// Counts NAR bytes on the way through, records throughput once the body
-/// completes, and reports how a transfer ended when it did not end well.
+/// completes, and logs one line per transfer saying how it ended.
 ///
 /// A transfer ends one of three ways, told apart on drop:
 ///
-/// - **EOF** — the body completed. Throughput feeds the EWMA, and a transfer
-///   that was long and slow is logged as a warning.
+/// - **EOF** — the body completed. Throughput feeds the EWMA and the
+///   histogram, and the transfer is logged at info with its size, duration
+///   and rate — at warn instead if it was long and slow. Narinfo lookups get
+///   no such line: a build makes thousands of them, and their latency is in
+///   the histogram.
 /// - **Upstream read error** — including the idle timeout. Counted as an
 ///   upstream error and the upstream is marked down and the prober kicked,
 ///   exactly like a failed request: an upstream that stalls mid-body is as
@@ -420,6 +564,7 @@ impl Read for MeteredReader {
             }
             Ok(n) => {
                 self.bytes += n as u64;
+                self.registry.record_nar_bytes(self.idx, n as u64);
                 Ok(n)
             }
             Err(e) => {
@@ -445,13 +590,24 @@ impl Drop for MeteredReader {
         if self.eof && secs > 0.0 && self.bytes > 0 {
             let rate = self.bytes as f64 / 1e6 / secs;
             self.registry.record_nar_throughput(self.idx, rate);
-            if secs >= SLOW_NAR_MIN_SECS && rate < SLOW_NAR_MBYTES_PER_SEC {
+            let slow = secs >= SLOW_NAR_MIN_SECS && rate < SLOW_NAR_MBYTES_PER_SEC;
+            let round = |v: f64| (v * 100.0).round() / 100.0;
+            let (secs, mbytes_per_sec) = (round(secs), round(rate));
+            if slow {
                 tracing::warn!(
                     url = self.url,
                     bytes = self.bytes,
-                    secs = secs as u64,
-                    mbytes_per_sec = format!("{rate:.2}"),
+                    secs,
+                    mbytes_per_sec,
                     "slow NAR transfer"
+                );
+            } else {
+                tracing::info!(
+                    url = self.url,
+                    bytes = self.bytes,
+                    secs,
+                    mbytes_per_sec,
+                    "NAR transfer done"
                 );
             }
         } else if !self.eof && !self.failed {

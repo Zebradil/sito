@@ -36,7 +36,7 @@ The filter is `RUST_LOG`, set by the module's `logLevel` option:
 
 | Level | What you get |
 | --- | --- |
-| `sito=info` (default) | The startup line and one line per upstream state change, `upstream state changed url=… up=… reason=…`. Nothing per request. |
+| `sito=info` (default) | The startup line, one line per upstream state change (`upstream state changed url=… up=… reason=…`), and one line per NAR download (`NAR transfer done url=… bytes=… secs=… mbytes_per_sec=…`). Narinfo lookups are not logged: a build makes thousands. |
 | `sito=debug` | Adds the selection plan and the upstream that answered for every request, plus each response code. Use it when routing looks wrong. |
 
 These warnings appear at the default level:
@@ -46,9 +46,9 @@ These warnings appear at the default level:
 | `upstream failed` | A request to an upstream failed: connection, TLS, timeout, or an error status other than 404. The upstream is marked down. |
 | `narinfo body read failed` | The narinfo headers arrived but the body did not. Treated like `upstream failed`. |
 | `NAR upstream read failed` | A NAR body broke off or sent nothing for 60 s. The upstream is marked down. Before the first byte, sito tries the next upstream; after it, Nix gets a short body and fails that download. |
-| `slow NAR transfer` | A NAR completed but took 30 s or more at under 1 MB/s. |
+| `slow NAR transfer` | A NAR completed but took 30 s or more at under 1 MB/s. Logged in place of `NAR transfer done`. |
 | `all NAR slots busy, waiting` | A NAR request waited 5 s for one of the `max-inflight` slots. |
-| `accept failed` | The listener could not accept a connection. After 100 failures in a row sito exits. |
+| `Error: listener failed` | The listener could not accept a connection, most often because sito ran out of file descriptors. The listener is gone after one failure, so sito exits and launchd or systemd restarts it. |
 
 `NAR transfer abandoned by client`, at info, means Nix hung up first. Nothing is recorded against the upstream.
 
@@ -81,10 +81,16 @@ Per upstream:
 | `hits` | Requests this upstream answered, narinfo and NAR alike. |
 | `misses` | 404s: the upstream does not have the path. Routine for a small cache in front of a big one. |
 | `errors` | Failed requests, including NAR bodies that broke off. Each also sets `healthy` to `false` and starts a probe pass at once. |
+| `nar_bytes` | NAR body bytes passed to clients, including transfers that broke off. |
 
 The moving averages weigh the newest sample at 0.3, so a handful of requests is enough to reflect a network change.
 
 The shape of `/status` is diagnostics for people, not a stable API.
+
+## 4. Graph it over time
+
+`/status` shows only the present. To see how upstreams behaved across builds and networks, ship `/metrics` to a
+metrics store: [Monitor sito over time](../monitoring/).
 
 ## Symptoms
 
