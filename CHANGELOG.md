@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.1](https://github.com/Zebradil/sito/compare/v0.2.0...v0.2.1) (2026-10-05)
+
+
+### Documentation
+
+* add ncro-related todos ([f24f991](https://github.com/Zebradil/sito/commit/f24f9916cc92b21a8c47b236cabb48e3dcf94309))
+* bootstrap docs-kit site ([#26](https://github.com/Zebradil/sito/issues/26)) ([80850a7](https://github.com/Zebradil/sito/commit/80850a7f1e6df7b8f90aad8ef138d6a5ece08215))
+* sieve theme, funnel logo and request cascade on the landing page ([#29](https://github.com/Zebradil/sito/issues/29)) ([591985e](https://github.com/Zebradil/sito/commit/591985ecaacbc2c6e943bc98c03dddb7bed72042))
+* write the docs site pages and retire docs/*.md ([#28](https://github.com/Zebradil/sito/issues/28)) ([6e99ddd](https://github.com/Zebradil/sito/commit/6e99ddde267d88e462c7a629dff680a4924321f7))
+
 ## [0.2.0](https://github.com/Zebradil/sito/compare/v0.1.0...v0.2.0) (2026-10-02)
 
 
