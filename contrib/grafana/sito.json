@@ -1,0 +1,1179 @@
+{
+  "title": "sito",
+  "uid": "sito",
+  "description": "Upstream health, latency and throughput from sito's /metrics.",
+  "tags": [
+    "sito",
+    "nix"
+  ],
+  "editable": true,
+  "graphTooltip": 1,
+  "refresh": "1m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "schemaVersion": 41,
+  "links": [
+    {
+      "title": "Monitoring guide",
+      "type": "link",
+      "icon": "doc",
+      "targetBlank": true,
+      "url": "https://zebradil.github.io/sito/guides/monitoring/"
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "label": "Data source",
+        "type": "datasource",
+        "query": "prometheus"
+      },
+      {
+        "name": "host",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "query": {
+          "query": "label_values(sito_uptime_seconds, host)",
+          "refId": "host",
+          "qryType": 1
+        },
+        "definition": "label_values(sito_uptime_seconds, host)",
+        "includeAll": true,
+        "allValue": ".*"
+      },
+      {
+        "name": "url",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "query": {
+          "query": "label_values(sito_upstream_requests_total{host=~\"$host\"}, url)",
+          "refId": "url",
+          "qryType": 1
+        },
+        "definition": "label_values(sito_upstream_requests_total{host=~\"$host\"}, url)",
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "label": "upstream",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "lan_url",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "query": {
+          "query": "label_values(sito_upstream_requests_total{host=~\"$host\"}, url)",
+          "refId": "lan_url",
+          "qryType": 1
+        },
+        "definition": "label_values(sito_upstream_requests_total{host=~\"$host\"}, url)",
+        "label": "LAN upstream",
+        "description": "The upstream whose health means at home."
+      }
+    ]
+  },
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      },
+      {
+        "name": "Away",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "enable": true,
+        "iconColor": "rgba(255, 120, 10, 0.5)",
+        "target": {
+          "expr": "sito_upstream_healthy{host=~\"$host\",url=\"$lan_url\"} == bool 0",
+          "refId": "Away",
+          "interval": "1m"
+        },
+        "expr": "sito_upstream_healthy{host=~\"$host\",url=\"$lan_url\"} == bool 0",
+        "step": "1m",
+        "titleFormat": "away"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Now",
+      "id": 1,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Uptime",
+      "id": 2,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sito_uptime_seconds{host=~\"$host\"}",
+          "legendFormat": "{{host}}",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value_and_name"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "NAR slots",
+      "id": 3,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 5,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sito_nar_slots_used{host=~\"$host\"}",
+          "legendFormat": "used",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sito_nar_slots_max{host=~\"$host\"}",
+          "legendFormat": "max",
+          "refId": "B",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value_and_name"
+      },
+      "description": "NAR transfers in flight, out of max-inflight."
+    },
+    {
+      "type": "stat",
+      "title": "Affinity entries",
+      "id": 4,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 10,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sito_affinity_entries{host=~\"$host\"}",
+          "legendFormat": "{{host}}",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value_and_name"
+      },
+      "description": "NAR paths remembered with the upstream that served their narinfo."
+    },
+    {
+      "type": "stat",
+      "title": "Healthy",
+      "id": 5,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 10,
+        "x": 14,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sito_upstream_healthy{host=~\"$host\",url=~\"$url\"}",
+          "legendFormat": "{{url}}",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "down",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "up",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value_and_name"
+      },
+      "description": "Last probe or request result per upstream. Absent until the first probe answers."
+    },
+    {
+      "type": "state-timeline",
+      "title": "At home / away",
+      "id": 6,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sito_upstream_healthy{host=~\"$host\",url=\"$lan_url\"}",
+          "legendFormat": "$lan_url",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "away",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "home",
+                  "color": "green"
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showValue": "never",
+        "mergeValues": true,
+        "rowHeight": 0.8,
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "description": "Health of the LAN upstream picked in `lan_url`. The same signal shades the other panels through the *Away* annotation.",
+      "interval": "1m"
+    },
+    {
+      "type": "state-timeline",
+      "title": "Upstream health",
+      "id": 7,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sito_upstream_healthy{host=~\"$host\",url=~\"$url\"}",
+          "legendFormat": "{{url}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "down",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "up",
+                  "color": "green"
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showValue": "never",
+        "mergeValues": true,
+        "rowHeight": 0.8,
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "interval": "1m"
+    },
+    {
+      "type": "row",
+      "title": "Builds",
+      "id": 8,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 15
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Narinfo latency p95",
+      "id": 9,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.95, sum by (url, le) (increase(sito_upstream_narinfo_seconds_bucket{host=~\"$host\",url=~\"$url\"}[$__rate_interval])))",
+          "legendFormat": "{{url}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Lookups are most of what a build waits on. Empty where an upstream answered no narinfo."
+    },
+    {
+      "type": "timeseries",
+      "title": "NAR throughput median",
+      "id": 10,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.5, sum by (url, le) (increase(sito_upstream_nar_bytes_per_second_bucket{host=~\"$host\",url=~\"$url\"}[$__rate_interval])))",
+          "legendFormat": "{{url}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Per completed NAR transfer. Buckets top out at 100 MB/s."
+    },
+    {
+      "type": "timeseries",
+      "title": "Download rate",
+      "id": 11,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (url) (rate(sito_upstream_nar_bytes_total{host=~\"$host\",url=~\"$url\"}[$__rate_interval]))",
+          "legendFormat": "{{url}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "NAR body bytes passed to clients, per second."
+    },
+    {
+      "type": "timeseries",
+      "title": "Requests",
+      "id": 12,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (url) (increase(sito_upstream_requests_total{host=~\"$host\",url=~\"$url\",result=\"hit\"}[$__rate_interval]))",
+          "legendFormat": "{{url}} hit",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (url) (increase(sito_upstream_requests_total{host=~\"$host\",url=~\"$url\",result=\"error\"}[$__rate_interval]))",
+          "legendFormat": "{{url}} error",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Hits and errors per upstream. Misses are in the hit ratio below."
+    },
+    {
+      "type": "row",
+      "title": "Over the selected range",
+      "id": 13,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "panels": []
+    },
+    {
+      "type": "bargauge",
+      "title": "Bytes served",
+      "id": 14,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 33
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (url) (increase(sito_upstream_nar_bytes_total{host=~\"$host\",url=~\"$url\"}[$__range]))",
+          "legendFormat": "{{url}}",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decbytes",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "valueMode": "text",
+        "showUnfilled": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "text": {
+          "titleSize": 14,
+          "valueSize": 18
+        }
+      }
+    },
+    {
+      "type": "bargauge",
+      "title": "Hit ratio",
+      "id": 15,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 33
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (url) (increase(sito_upstream_requests_total{host=~\"$host\",url=~\"$url\",result=\"hit\"}[$__range])) / sum by (url) (increase(sito_upstream_requests_total{host=~\"$host\",url=~\"$url\",result=~\"hit|miss\"}[$__range]))",
+          "legendFormat": "{{url}}",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "valueMode": "text",
+        "showUnfilled": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "text": {
+          "titleSize": 14,
+          "valueSize": 18
+        }
+      },
+      "description": "A cache that mostly misses still costs a round trip for every path in its tier."
+    },
+    {
+      "type": "bargauge",
+      "title": "NARs under 2 MB/s",
+      "id": 16,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 33
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (url) (increase(sito_upstream_nar_bytes_per_second_bucket{host=~\"$host\",url=~\"$url\",le=~\"2000000|2e\\\\+06\"}[$__range])) / sum by (url) (increase(sito_upstream_nar_bytes_per_second_count{host=~\"$host\",url=~\"$url\"}[$__range]))",
+          "legendFormat": "{{url}}",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "valueMode": "text",
+        "showUnfilled": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "text": {
+          "titleSize": 14,
+          "valueSize": 18
+        }
+      },
+      "description": "Share of completed NAR transfers slower than 2 MB/s."
+    },
+    {
+      "type": "bargauge",
+      "title": "Errors",
+      "id": 17,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 33
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (url) (increase(sito_upstream_requests_total{host=~\"$host\",url=~\"$url\",result=\"error\"}[$__range]))",
+          "legendFormat": "{{url}}",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "valueMode": "text",
+        "showUnfilled": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "text": {
+          "titleSize": 14,
+          "valueSize": 18
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Ranking inputs",
+      "id": 18,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 41
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Probe EWMA",
+      "id": 19,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 42
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sito_upstream_probe_ewma_seconds{host=~\"$host\",url=~\"$url\"}",
+          "legendFormat": "{{url}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Moving average of the probe round trip, as ranked on."
+    },
+    {
+      "type": "timeseries",
+      "title": "Narinfo EWMA",
+      "id": 20,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 42
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sito_upstream_narinfo_ewma_seconds{host=~\"$host\",url=~\"$url\"}",
+          "legendFormat": "{{url}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Moving average of narinfo latency, as ranked on."
+    },
+    {
+      "type": "timeseries",
+      "title": "NAR throughput EWMA",
+      "id": 21,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 42
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sito_upstream_nar_ewma_bytes_per_second{host=~\"$host\",url=~\"$url\"}",
+          "legendFormat": "{{url}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Moving average of completed NAR transfer throughput."
+    },
+    {
+      "type": "timeseries",
+      "title": "NAR slots",
+      "id": 22,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 50
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sito_nar_slots_used{host=~\"$host\"}",
+          "legendFormat": "used",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sito_nar_slots_max{host=~\"$host\"}",
+          "legendFormat": "max",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Uptime",
+      "id": 23,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 50
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sito_uptime_seconds{host=~\"$host\"}",
+          "legendFormat": "{{host}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Drops to zero are restarts. Gaps are time sito was not running."
+    }
+  ]
+}
