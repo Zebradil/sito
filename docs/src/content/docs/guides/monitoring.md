@@ -114,14 +114,20 @@ The store decides how old a sample it accepts, and a sample it refuses is lost:
 
 ## 3. Check that samples arrive
 
-On the machine, vmagent's own metrics say whether the queue drains:
+On the machine, vmagent's own pages say whether it scrapes sito and whether the queue drains:
 
 ```sh
-curl -s http://127.0.0.1:8429/metrics | grep -E '^vmagent_remotewrite_(pending_data_bytes|requests_total)'
+curl -s http://127.0.0.1:8429/targets
+curl -s http://127.0.0.1:8429/metrics | grep -E '^vmagent_remotewrite_(pending_data_bytes|requests_total|errors_total)'
 ```
 
-`vmagent_remotewrite_pending_data_bytes` grows while the store is out of reach and falls back once it answers. On the
-store, query `sito_uptime_seconds`; it should be there for every host label you set.
+`/targets` should list the sito target as `up`; scraping works even while the store is unreachable.
+`vmagent_remotewrite_pending_data_bytes` grows while the store is out of reach and falls back once it answers.
+`vmagent_remotewrite_requests_total{status_code="2XX"}` counts delivered blocks, so `0` means nothing has arrived yet,
+and a rising `vmagent_remotewrite_errors_total` means sends are attempted and fail. The vmagent log names the reason
+for each failure in a `couldn't send a block` warning, such as a dial timeout or an HTTP status from the store.
+
+On the store, query `sito_uptime_seconds`; it should be there for every host label you set.
 
 VictoriaMetrics shows a sample in queries about 30 s after it arrives (`-search.latencyOffset`). Backfilled samples
 appear in queries within seconds of arriving, cached ranges included.
@@ -152,6 +158,22 @@ The EWMA gauges show what the ranker saw at scrape time. A build often finishes 
 little about it. The counters and histograms record every request between two scrapes, so use them for anything
 about a build.
 
+## Grafana dashboard
+
+[`contrib/grafana/sito.json`](https://github.com/Zebradil/sito/blob/main/contrib/grafana/sito.json) puts every query
+below on one dashboard. Import it under **Dashboards → New → Import**, then pick a datasource: VictoriaMetrics through
+Grafana's Prometheus datasource type, or Prometheus itself.
+
+| Variable | Meaning |
+| --- | --- |
+| `datasource` | The Prometheus-type datasource holding sito's metrics. |
+| `host` | The `host` label from `-remoteWrite.label=host=…`; *All* when it is not set. |
+| `upstream` | Upstreams to show, by `url`. |
+| `LAN upstream` | The upstream whose health means "at home". Pick it once and save the dashboard. |
+
+The *Away* annotation shades every panel with a time axis while the LAN upstream is down. Time away is not a gap, because
+vmagent backfills it; a gap means sito was not running.
+
 ## Queries
 
 Each of these was run against VictoriaMetrics fed by vmagent; Prometheus accepts the same PromQL. Swap the `[1h]`
@@ -176,7 +198,8 @@ histogram_quantile(0.95, sum by (url, le) (increase(sito_upstream_narinfo_second
 histogram_quantile(0.5, sum by (url, le) (increase(sito_upstream_nar_bytes_per_second_bucket[1h])))
 ```
 
-**Share of NARs slower than 2 MB/s.** A bucket bound (`le`) picks the threshold:
+**Share of NARs slower than 2 MB/s.** A bucket bound (`le`) picks the threshold. Prometheus 3 scraping sito directly
+stores that bound as `le="2e+06"`; through vmagent it stays as sito writes it:
 
 ```promql
 sum by (url) (increase(sito_upstream_nar_bytes_per_second_bucket{le="2000000"}[1h]))
