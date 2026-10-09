@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.4.0](https://github.com/Zebradil/sito/compare/v0.3.0...v0.4.0) (2026-10-09)
+
+
+### Features
+
+* Grafana dashboard for /metrics ([#37](https://github.com/Zebradil/sito/issues/37)) ([e90ff8c](https://github.com/Zebradil/sito/commit/e90ff8c0617484145295b10143b78f8d8d33660f)), closes [#33](https://github.com/Zebradil/sito/issues/33)
+
+
+### Fixes
+
+* **deps:** update docs-kit to v0.5.0 ([#36](https://github.com/Zebradil/sito/issues/36)) ([eb4139f](https://github.com/Zebradil/sito/commit/eb4139ff507d67bf3738307d31a4abd76d9e0da0))
+* exit on accept failure instead of hanging ([#35](https://github.com/Zebradil/sito/issues/35)) ([bf0a60a](https://github.com/Zebradil/sito/commit/bf0a60a1d55e1adac8d8553f43d5eef88c064e5e))
+
+
+### Documentation
+
+* dedicated monitoring guide ([#32](https://github.com/Zebradil/sito/issues/32)) ([e46bdbf](https://github.com/Zebradil/sito/commit/e46bdbf9a74caf647373056a630e973a0166f8e7))
+* **monitoring:** explain vmagent status checks ([ad1f8f7](https://github.com/Zebradil/sito/commit/ad1f8f7379891818d56eb8426c7b725d70a8af6f))
+
 ## [0.3.0](https://github.com/Zebradil/sito/compare/v0.2.1...v0.3.0) (2026-10-05)
 
 
