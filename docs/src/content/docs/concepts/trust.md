@@ -23,6 +23,9 @@ Only two responses come from sito rather than an upstream:
 Everything else is either relayed from an upstream (`*.narinfo`, `/nar/*`) or a status code with a short plain-text
 body: 404 for an unknown path or an exhausted plan, 405 for any method other than `GET` and `HEAD`.
 
+Relayed responses keep the upstream's status and `Content-Type`, and add one header of sito's own:
+`X-Sito-Upstream`, the configured URL of the upstream that answered. The body is untouched.
+
 A narinfo is read into memory, up to 1 MiB, so sito can remember its `URL:` field for affinity. The bytes sent on are
 still exactly the bytes received. A larger narinfo goes out truncated and Nix rejects it as malformed; real ones are
 well under a kilobyte.

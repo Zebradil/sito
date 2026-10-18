@@ -132,9 +132,10 @@ fn nar_affinity_prefers_the_upstream_that_served_the_narinfo() {
         ("/abc.narinfo", NARINFO.as_bytes()),
         ("/nar/deadbeef.nar.xz", NAR_BYTES),
     ]);
-    let base = sito_at(&[a, b]);
+    let base = sito_at(&[a, b.clone()]);
 
-    get(&format!("{base}/abc.narinfo")).unwrap();
+    let resp = ureq::get(&format!("{base}/abc.narinfo")).call().unwrap();
+    assert_eq!(resp.headers()["X-Sito-Upstream"], b.as_str());
     let (code, body) = get(&format!("{base}/nar/deadbeef.nar.xz")).unwrap();
     assert_eq!(code, 200);
     assert_eq!(body, NAR_BYTES);
