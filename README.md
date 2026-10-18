@@ -31,8 +31,8 @@ The docs site, [zebradil.github.io/sito](https://zebradil.github.io/sito/), has:
 In this repository:
 
 - [`CONTEXT.md`](CONTEXT.md) — the project's vocabulary.
-- [`docs/adr/`](docs/adr/) — why it is built this way; [`todo.md`](todo.md) —
-  what was deliberately deferred.
+- [`docs/adr/`](docs/adr/) — why it is built this way, and what was
+  deliberately deferred.
 
 ## Shape
 
