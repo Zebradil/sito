@@ -28,6 +28,17 @@ Priority: 10
 
 Connection refused means sito is not running or listens elsewhere: check the service and its `listen` address.
 
+Every relayed narinfo and NAR carries an `X-Sito-Upstream` header naming the upstream that answered, so one request
+shows where a path comes from without debug logs:
+
+```sh
+curl -sI http://127.0.0.1:5001/<hash>.narinfo | grep -i x-sito-upstream
+```
+
+```text
+x-sito-upstream: https://cache.nixos.org
+```
+
 ## 2. Read the log
 
 On NixOS: `journalctl -u sito -f`. On nix-darwin: `tail -f /var/log/sito.log`. By hand: standard error.

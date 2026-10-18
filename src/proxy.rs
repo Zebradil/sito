@@ -378,9 +378,11 @@ enum Attempt {
 ///
 /// The upstream's status code is mirrored, and only `Content-Type` is carried
 /// over; upstream caching, CORS and vendor headers are dropped, since the
-/// client is a Nix daemon on localhost that reads neither. No client request
-/// headers travel the other way, so an upstream never sees a `Range` or
-/// `If-None-Match` it could answer 206 or 304 to.
+/// client is a Nix daemon on localhost that reads neither. sito adds
+/// `X-Sito-Upstream` with the configured URL of the upstream that answered,
+/// so `curl -I` shows where a path came from without debug logs. No client
+/// request headers travel the other way, so an upstream never sees a `Range`
+/// or `If-None-Match` it could answer 206 or 304 to.
 ///
 /// - **HEAD** answers with those headers plus the upstream's
 ///   `Content-Length`, and no body.
@@ -426,13 +428,15 @@ fn attempt(app: &App, idx: usize, path: &str, kind: RequestKind, head: bool) -> 
     let headers_ms = start.elapsed().as_secs_f64() * 1000.0;
 
     let status = tiny_http::StatusCode(upstream.status().as_u16());
-    let headers: Vec<Header> = upstream
+    let mut headers: Vec<Header> = upstream
         .headers()
         .get("Content-Type")
         .and_then(|v| v.to_str().ok())
         .map(|v| header("Content-Type", v))
         .into_iter()
         .collect();
+    // Config URLs are not validated as header values; skip the header rather than panic.
+    headers.extend(Header::from_bytes(&b"X-Sito-Upstream"[..], base.as_bytes()).ok());
     let len: Option<usize> = upstream
         .headers()
         .get("Content-Length")
