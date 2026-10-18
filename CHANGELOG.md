@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.0](https://github.com/Zebradil/sito/compare/v0.4.0...v0.5.0) (2026-10-18)
+
+
+### Features
+
+* add X-Sito-Upstream header and ncro comparison page ([#43](https://github.com/Zebradil/sito/issues/43)) ([393a411](https://github.com/Zebradil/sito/commit/393a411d391fd3a98efb117c90bb9178c9e7617e))
+
+
+### Documentation
+
+* drop todo.md in favour of the ADRs ([#45](https://github.com/Zebradil/sito/issues/45)) ([1df9a1c](https://github.com/Zebradil/sito/commit/1df9a1ce993ca5f370ddefec419f3aa29cfa6ed4))
+
 ## [0.4.0](https://github.com/Zebradil/sito/compare/v0.3.0...v0.4.0) (2026-10-09)
 
 
