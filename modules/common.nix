@@ -27,7 +27,13 @@ let
       tier:
       lib.optionalAttrs (tier.strategy != null) { inherit (tier) strategy; }
       // {
-        upstream = map (upstream: { inherit (upstream) url public-keys; }) (byPriority tier.upstreams);
+        upstream = map
+          (
+            upstream:
+            { inherit (upstream) url public-keys; }
+            // lib.optionalAttrs (upstream.max-inflight != null) { inherit (upstream) max-inflight; }
+          )
+          (byPriority tier.upstreams);
       }
     )
     (byPriority cfg.tiers);
@@ -123,6 +129,14 @@ in
                       type = lib.types.listOf lib.types.str;
                       default = [ ];
                       description = "Signing keys this upstream's narinfos carry.";
+                    };
+                    max-inflight = lib.mkOption {
+                      type = lib.types.nullOr lib.types.ints.positive;
+                      default = null;
+                      description = ''
+                        Cap on concurrent NAR transfers from this upstream, on
+                        top of the global `max-inflight`; null sets none.
+                      '';
                     };
                   };
                 }
