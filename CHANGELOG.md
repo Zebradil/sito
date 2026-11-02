@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0](https://github.com/Zebradil/sito/compare/v0.5.0...v0.6.0) (2026-11-02)
+
+
+### Features
+
+* per-upstream max-inflight cap on NAR transfers ([#49](https://github.com/Zebradil/sito/issues/49)) ([67b247a](https://github.com/Zebradil/sito/commit/67b247a095848f7f9360b8d590f3a4f12a47d05f))
+
+
+### Fixes
+
+* use stdenv.hostPlatform.system for default package ([#48](https://github.com/Zebradil/sito/issues/48)) ([245cb26](https://github.com/Zebradil/sito/commit/245cb26aa84d567f25f8492236ebe53ffe3f3fd2))
+
 ## [0.5.0](https://github.com/Zebradil/sito/compare/v0.4.0...v0.5.0) (2026-10-18)
 
 
