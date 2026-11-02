@@ -63,7 +63,7 @@ in
 
     package = lib.mkOption {
       type = lib.types.package;
-      default = self.packages.${pkgs.system}.sito;
+      default = self.packages.${pkgs.stdenv.hostPlatform.system}.sito;
       defaultText = lib.literalExpression "sito.packages.<system>.sito";
       description = "The sito package to run.";
     };
