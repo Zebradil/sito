@@ -91,7 +91,13 @@ pub fn build(cfg: &config::Config) -> Result<(Arc<App>, Server)> {
         tiers,
         info_agent,
         nar_agent,
-        nar_slots: proxy::Slots::new(cfg.max_inflight),
+        nar_slots: proxy::Slots::new(cfg.max_inflight, "global"),
+        upstream_slots: cfg
+            .tiers
+            .iter()
+            .flat_map(|t| &t.upstreams)
+            .map(|u| u.max_inflight.map(|max| proxy::Slots::new(max, &u.url)))
+            .collect(),
     });
     let server =
         Server::http(&cfg.listen).map_err(|e| anyhow::anyhow!("bind {}: {e}", cfg.listen))?;

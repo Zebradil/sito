@@ -17,7 +17,10 @@ let
           enable = true;
           tiers.lan = {
             priority = 10;
-            upstreams.box.url = "http://box.lan:5000";
+            upstreams.box = {
+              url = "http://box.lan:5000";
+              max-inflight = 2;
+            };
             upstreams.remote = {
               priority = 2000;
               url = "https://remote.example";
@@ -36,7 +39,7 @@ let
     tier = [
       {
         upstream = [
-          { url = "http://box.lan:5000"; public-keys = [ ]; }
+          { url = "http://box.lan:5000"; public-keys = [ ]; max-inflight = 2; }
           { url = "http://work.example:5000"; public-keys = [ ]; }
           { url = "https://remote.example"; public-keys = [ "remote-1:AAAA" ]; }
         ];

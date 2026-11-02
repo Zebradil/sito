@@ -58,7 +58,7 @@ These warnings appear at the default level:
 | `narinfo body read failed` | The narinfo headers arrived but the body did not. Treated like `upstream failed`. |
 | `NAR upstream read failed` | A NAR body broke off or sent nothing for 60 s. The upstream is marked down. Before the first byte, sito tries the next upstream; after it, Nix gets a short body and fails that download. |
 | `slow NAR transfer` | A NAR completed but took 30 s or more at under 1 MB/s. Logged in place of `NAR transfer done`. |
-| `all NAR slots busy, waiting` | A NAR request waited 5 s for one of the `max-inflight` slots. |
+| `all NAR slots busy, waiting` | A NAR request waited 5 s for a `max-inflight` slot. `scope` names the cap: `global`, or the URL of an upstream with its own. |
 | `Error: listener failed` | The listener could not accept a connection, most often because sito ran out of file descriptors. The listener is gone after one failure, so sito exits and launchd or systemd restarts it. |
 
 `NAR transfer abandoned by client`, at info, means Nix hung up first. Nothing is recorded against the upstream.
@@ -76,6 +76,7 @@ Every number is in memory since the process started; a restart resets them all.
 | `uptime_secs` | Seconds since sito started. |
 | `affinity_entries` | NAR paths remembered with the upstream whose narinfo named them. Cleared whenever it reaches 4096, so it rises and drops. |
 | `nar_slots` | `used`: NAR transfers in flight; `max`: the `max-inflight` cap. |
+| `upstream_nar_slots` | Per upstream, in `upstreams[]` order: `used` and `max` of its own `max-inflight`, or `null` where it sets none. |
 | `upstreams[]` | One entry per upstream, in config order: the first tier's upstreams, then the second's. |
 
 Per upstream:
@@ -136,6 +137,9 @@ moves on. Slowness points at sito being up with an upstream that accepts connect
 
 **A NAR download fails partway.** `NAR upstream read failed` names the upstream and how many bytes arrived. Once bytes
 have reached Nix, sito cannot switch upstreams or resume, so Nix fails that download.
+
+If those failures come in bursts during large builds, while the same NAR fetched alone succeeds, the path to that
+upstream breaks down under parallel flows. Give the upstream its own `max-inflight`: try 2, and 1 if 2 still fails.
 
 **Large builds stall.** Check `nar_slots`. `used` at `max` while bytes flow: raise `max-inflight`. `used` at `max` with
 nothing moving, plus `all NAR slots busy, waiting`: transfers are stuck. Each gives up after 60 s without bytes, so look

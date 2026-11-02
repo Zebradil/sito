@@ -34,6 +34,9 @@ pub struct App {
     pub nar_agent: ureq::Agent,
     /// Caps concurrent NAR transfers (`max-inflight`).
     pub(crate) nar_slots: Slots,
+    /// Per-upstream NAR caps (an upstream's own `max-inflight`), by flat
+    /// upstream index; `None` where the upstream sets none.
+    pub(crate) upstream_slots: Vec<Option<Slots>>,
 }
 
 /// Static tier shape from config: which upstream indices belong to which
@@ -112,6 +115,10 @@ fn status(app: &App, req: Request) {
         "uptime_secs": app.registry.started.elapsed().as_secs(),
         "affinity_entries": app.registry.affinity_len(),
         "nar_slots": {"used": app.nar_slots.used(), "max": app.nar_slots.max},
+        // By flat upstream index, like `upstreams`; null where none is set.
+        "upstream_nar_slots": app.upstream_slots.iter().map(|s| s.as_ref().map(|s| {
+            serde_json::json!({"used": s.used(), "max": s.max})
+        })).collect::<Vec<_>>(),
         "upstreams": app.registry.snapshot(),
     });
     let mut resp = Response::from_string(body.to_string());
@@ -329,6 +336,7 @@ fn forward(app: &App, req: Request, kind: RequestKind) {
 
     let mut affinity_failed = None;
     for idx in attempts {
+        let _upstream_slot = upstream_slot(app, idx, kind);
         match attempt(app, idx, &path, kind, head) {
             Attempt::Hit(resp) => return respond(req, resp),
             Attempt::Failed if input.affinity == Some(idx) => affinity_failed = Some(idx),
@@ -338,6 +346,7 @@ fn forward(app: &App, req: Request, kind: RequestKind) {
     if let Some(idx) = affinity_failed {
         for _ in 0..AFFINITY_RETRIES {
             std::thread::sleep(AFFINITY_RETRY_DELAY);
+            let _upstream_slot = upstream_slot(app, idx, kind);
             match attempt(app, idx, &path, kind, head) {
                 Attempt::Hit(resp) => return respond(req, resp),
                 Attempt::Miss => break,
@@ -346,6 +355,21 @@ fn forward(app: &App, req: Request, kind: RequestKind) {
         }
     }
     respond(req, text(404, "no upstream has this path"));
+}
+
+/// Take a slot under upstream `idx`'s own NAR cap, if it sets one. The
+/// caller keeps it until the response is sent, so it counts the transfer, not
+/// just the request; on a miss or failure it is released before the next
+/// upstream is tried.
+///
+/// shortcut: a request waiting here sends Nix nothing, so a wait past Nix's
+/// `stalled-download-timeout` (300 s) aborts it and Nix retries; revisit if a
+/// low cap with a large closure makes that common.
+fn upstream_slot(app: &App, idx: usize, kind: RequestKind) -> Option<Slot<'_>> {
+    if kind != RequestKind::Nar {
+        return None;
+    }
+    app.upstream_slots[idx].as_ref().map(Slots::acquire)
 }
 
 /// Extra tries at a failed affinity upstream, [`AFFINITY_RETRY_DELAY`] apart:
@@ -638,6 +662,8 @@ pub(crate) struct Slots {
     used: std::sync::Mutex<usize>,
     freed: std::sync::Condvar,
     max: usize,
+    /// What the cap covers, for the busy warning: `global` or an upstream URL.
+    scope: String,
 }
 
 /// How long a NAR may wait for a slot before sito logs that the cap is full.
@@ -646,11 +672,12 @@ const SLOT_WAIT_WARN: std::time::Duration = std::time::Duration::from_secs(5);
 impl Slots {
     /// `max` is clamped to at least 1, since a zero cap would block every NAR
     /// forever.
-    pub(crate) fn new(max: usize) -> Self {
+    pub(crate) fn new(max: usize, scope: impl Into<String>) -> Self {
         Slots {
             used: std::sync::Mutex::new(0),
             freed: std::sync::Condvar::new(),
             max: max.max(1),
+            scope: scope.into(),
         }
     }
 
@@ -665,7 +692,11 @@ impl Slots {
             .wait_timeout_while(self.used.lock().unwrap(), SLOT_WAIT_WARN, full)
             .unwrap();
         if wait.timed_out() {
-            tracing::warn!(max = self.max, "all NAR slots busy, waiting");
+            tracing::warn!(
+                max = self.max,
+                scope = self.scope,
+                "all NAR slots busy, waiting"
+            );
             used = self.freed.wait_while(used, full).unwrap();
         }
         *used += 1;

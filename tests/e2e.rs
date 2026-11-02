@@ -297,12 +297,12 @@ fn failed_affinity_upstream_is_retried_before_404() {
     assert_eq!(status["upstreams"][1]["misses"], 1);
 }
 
-#[test]
-fn stuck_nar_does_not_block_narinfo() {
-    // One NAR slot, taken by a NAR whose upstream accepted and went silent.
+/// Upstream that answers probes but accepts every other request and then goes
+/// silent, holding the connection open.
+fn silent_upstream() -> String {
     use std::io::Write;
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let silent = format!("http://{}", listener.local_addr().unwrap());
+    let url = format!("http://{}", listener.local_addr().unwrap());
     std::thread::spawn(move || {
         for mut conn in listener.incoming().flatten() {
             let mut buf = [0; 4096];
@@ -319,22 +319,64 @@ fn stuck_nar_does_not_block_narinfo() {
             }
         }
     });
+    url
+}
+
+/// Poll `/status` until `ready` holds, failing after 5 s.
+fn wait_for_status(base: &str, what: &str, ready: impl Fn(&serde_json::Value) -> bool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !ready(&status_of(base)) {
+        assert!(std::time::Instant::now() < deadline, "{what}");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn stuck_nar_does_not_block_narinfo() {
+    // One NAR slot, taken by a NAR whose upstream accepted and went silent.
     let full = mock_upstream(vec![("/abc.narinfo", NARINFO.as_bytes())]);
-    let base = sito_with(&[full, silent], 1);
+    let base = sito_with(&[full, silent_upstream()], 1);
 
     let nar = format!("{base}/nar/stuck.nar");
     std::thread::spawn(move || get(&nar));
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while status_of(&base)["nar_slots"]["used"] != 1 {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "NAR never took its slot"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    wait_for_status(&base, "NAR never took its slot", |s| {
+        s["nar_slots"]["used"] == 1
+    });
 
     let (code, body) = get(&format!("{base}/abc.narinfo")).unwrap();
     assert_eq!(code, 200);
     assert_eq!(body, NARINFO.as_bytes());
     assert_eq!(status_of(&base)["nar_slots"]["max"], 1);
+}
+
+#[test]
+fn upstream_cap_holds_extra_nars_back() {
+    // Global cap 8, but the silent upstream allows one transfer: the second
+    // NAR passes the global cap and then waits on the upstream's own.
+    let silent = silent_upstream();
+    let open = mock_upstream(vec![]);
+    let cfg = sito::config::Config::parse(&format!(
+        "listen = \"127.0.0.1:0\"\nmax-inflight = 8\n\
+         [[tier]]\n  [[tier.upstream]]\n  url = \"{silent}\"\n  max-inflight = 1\n\
+           [[tier.upstream]]\n  url = \"{open}\"\n"
+    ))
+    .unwrap();
+    let (app, server) = sito::build(&cfg).unwrap();
+    let base = format!(
+        "http://127.0.0.1:{}",
+        server.server_addr().to_ip().unwrap().port()
+    );
+    std::thread::spawn(move || sito::serve(app, server));
+
+    for name in ["a", "b"] {
+        let nar = format!("{base}/nar/{name}.nar");
+        std::thread::spawn(move || get(&nar));
+    }
+    wait_for_status(&base, "both NARs should hold a global slot", |s| {
+        s["nar_slots"]["used"] == 2
+    });
+    let status = status_of(&base);
+    assert_eq!(status["upstream_nar_slots"][0]["used"], 1);
+    assert_eq!(status["upstream_nar_slots"][0]["max"], 1);
+    assert!(status["upstream_nar_slots"][1].is_null());
 }

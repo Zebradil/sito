@@ -135,7 +135,7 @@ covered in [Monitor sito over time](../monitoring/).
 | --- | --- | --- |
 | `enable` | `false` | Run the daemon. |
 | `package` | `sito.packages.<system>.sito` | Build to run. |
-| `tiers` | `{}` | Named tiers: `{ priority ? 1000; strategy ? null; upstreams.<name> = { priority ? 1000; url; public-keys ? []; }; }`. A `null` strategy leaves it to sito's default, `sequential`. |
+| `tiers` | `{}` | Named tiers: `{ priority ? 1000; strategy ? null; upstreams.<name> = { priority ? 1000; url; public-keys ? []; max-inflight ? null; }; }`. A `null` strategy leaves it to sito's default, `sequential`. |
 | `settings` | `{}` | The TOML config as an attrset: `listen`, `probe-interval-secs`, `probe-timeout-secs`, `max-inflight`, or a raw `tier` list. |
 | `manageSubstituters` | `true` | Point `nix.settings.substituters` at sito and trust every configured `public-keys` entry. |
 | `extraFallbackSubstituters` | `[]` | Substituters added after sito's own address, only while `manageSubstituters` is on. |

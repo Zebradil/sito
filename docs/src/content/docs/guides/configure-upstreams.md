@@ -107,6 +107,7 @@ Tier numbers in errors count from 0. The file is read once at startup: restart s
 | --- | --- | --- |
 | `url` | required | Base URL of an HTTP binary cache, `http://` or `https://`. |
 | `public-keys` | `[]` | Signing keys of this cache's narinfos, for the Nix client's `trusted-public-keys`. Ignored by sito itself. |
+| `max-inflight` | unset | Concurrent NAR transfers from this upstream, on top of the global `max-inflight`. Past the cap, its NAR requests wait for a slot. For a path that breaks down under many parallel flows, such as a VPN client that drops packets once it saturates a core. Values below 1 count as 1. |
 
 ## Command line
 

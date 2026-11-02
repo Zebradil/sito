@@ -76,6 +76,13 @@ pub struct Upstream {
     /// `trusted-public-keys`.
     #[serde(default)]
     pub public_keys: Vec<String>,
+    /// Cap on concurrent NAR transfers from this upstream, on top of the
+    /// global `max-inflight`; unset means none. For an upstream whose path
+    /// degrades under many parallel flows (a VPN client that drops packets
+    /// once it saturates a core, say): past the cap, NAR requests for it wait
+    /// for a slot instead of opening another flow.
+    #[serde(default)]
+    pub max_inflight: Option<usize>,
 }
 
 fn default_listen() -> String {
@@ -157,6 +164,19 @@ strategy = "sequential"
         assert_eq!(cfg.tiers[1].strategy, Strategy::Sequential);
         assert_eq!(cfg.tiers[0].upstreams[0].public_keys.len(), 1);
         assert!(cfg.tiers[0].upstreams[1].public_keys.is_empty());
+        assert_eq!(cfg.tiers[0].upstreams[0].max_inflight, None);
+    }
+
+    #[test]
+    fn parses_upstream_max_inflight() {
+        let raw = r#"
+[[tier]]
+  [[tier.upstream]]
+  url = "http://a:1"
+  max-inflight = 4
+"#;
+        let cfg = Config::parse(raw).unwrap();
+        assert_eq!(cfg.tiers[0].upstreams[0].max_inflight, Some(4));
     }
 
     #[test]
