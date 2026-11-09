@@ -2,6 +2,12 @@
 name: sito
 tagline: A local always-on Nix substituter proxy for roaming clients.
 repo: https://github.com/Zebradil/sito
+analytics:
+  script: https://stats.zebradil.dev/app.js
+  attributes:
+    data-website-id: 790b0413-eb02-46f6-9cd9-fb1c62818553
+    # Counts only the published site, not local dev or preview builds.
+    data-domains: zebradil.github.io
 theme: sieve
 logo: { light: ./src/assets/logo.svg, dark: ./src/assets/logo-dark.svg }
 headline: One substituter. The fastest reachable cache.
