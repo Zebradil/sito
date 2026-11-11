@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=node_modules/@zebradil/starlight-kit/schema/site.schema.json
+# yaml-language-server: $schema=node_modules/@zebradil/docs-kit/schema/site.schema.json
 name: sito
 tagline: A local always-on Nix substituter proxy for roaming clients.
 repo: https://github.com/Zebradil/sito
