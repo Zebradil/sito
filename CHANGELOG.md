@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.1](https://github.com/Zebradil/sito/compare/v0.6.0...v0.6.1) (2026-11-13)
+
+
+### Documentation
+
+* count docs site visitors with Umami ([#56](https://github.com/Zebradil/sito/issues/56)) ([2703bef](https://github.com/Zebradil/sito/commit/2703befe7fd32b0b7de3a04351c7e07fd0cd57f9))
+* install docs-kit from npm ([#58](https://github.com/Zebradil/sito/issues/58)) ([6f2bc45](https://github.com/Zebradil/sito/commit/6f2bc45880da3875762ca58e6ba15a0ee84b3b75))
+
 ## [0.6.0](https://github.com/Zebradil/sito/compare/v0.5.0...v0.6.0) (2026-11-02)
 
 
