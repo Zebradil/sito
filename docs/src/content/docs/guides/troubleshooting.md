@@ -47,7 +47,7 @@ The filter is `RUST_LOG`, set by the module's `logLevel` option:
 
 | Level | What you get |
 | --- | --- |
-| `sito=info` (default) | The startup line, one line per upstream state change (`upstream state changed url=… up=… reason=…`), and one line per NAR download (`NAR transfer done url=… bytes=… secs=… mbytes_per_sec=…`). Narinfo lookups are not logged: a build makes thousands. |
+| `sito=info` (default) | The startup line, one line per upstream state change (`upstream state changed url=… up=… reason=…`), one line per NAR download (`NAR transfer done url=… bytes=… secs=… mbytes_per_sec=…`), and one line per NAR try skipped because its upstream is marked down with every slot of its own `max-inflight` busy (`upstream down and its NAR slots busy, skipping url=…`). Narinfo lookups are not logged: a build makes thousands. |
 | `sito=debug` | Adds the selection plan and the upstream that answered for every request, plus each response code. Use it when routing looks wrong. |
 
 These warnings appear at the default level:

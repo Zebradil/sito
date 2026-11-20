@@ -244,6 +244,12 @@ impl Registry {
         });
     }
 
+    /// Whether the last verdict on this upstream, from a probe or a failed
+    /// request, was down. `false` before the first probe answers.
+    pub fn is_down(&self, index: usize) -> bool {
+        self.with(index, |u| u.healthy == Some(false))
+    }
+
     /// Remember which upstream served the narinfo that named `nar_path`, so
     /// the NAR request that follows goes to the same place — narinfo `URL:`
     /// fields are relative to their own cache, so another upstream's copy is
