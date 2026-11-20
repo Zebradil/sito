@@ -326,6 +326,11 @@ fn selection_input(app: &App, kind: RequestKind, path: &str) -> SelectionInput {
 /// would retry: once Nix's own retries ran out, a 5xx on a NAR fails the
 /// whole build unless `--fallback` is set, while a 404 lets Nix build that
 /// path locally.
+///
+/// An attempt at an upstream that is marked down and whose own NAR cap is
+/// full counts as failed without connecting (see [`upstream_slot`]), so a
+/// flapping upstream costs each request its own tries and the retry window,
+/// never a place in a queue of other requests' connect timeouts.
 fn forward(app: &App, req: Request, kind: RequestKind) {
     let path = req.url().to_string();
     let head = *req.method() == Method::Head;
@@ -336,8 +341,12 @@ fn forward(app: &App, req: Request, kind: RequestKind) {
 
     let mut affinity_failed = None;
     for idx in attempts {
-        let _upstream_slot = upstream_slot(app, idx, kind);
-        match attempt(app, idx, &path, kind, head) {
+        let slot = upstream_slot(app, idx, kind);
+        let result = match slot {
+            Some(_) => attempt(app, idx, &path, kind, head),
+            None => Attempt::Failed,
+        };
+        match result {
             Attempt::Hit(resp) => return respond(req, resp),
             Attempt::Failed if input.affinity == Some(idx) => affinity_failed = Some(idx),
             Attempt::Miss | Attempt::Failed => {}
@@ -346,8 +355,12 @@ fn forward(app: &App, req: Request, kind: RequestKind) {
     if let Some(idx) = affinity_failed {
         for _ in 0..AFFINITY_RETRIES {
             std::thread::sleep(AFFINITY_RETRY_DELAY);
-            let _upstream_slot = upstream_slot(app, idx, kind);
-            match attempt(app, idx, &path, kind, head) {
+            let slot = upstream_slot(app, idx, kind);
+            let result = match slot {
+                Some(_) => attempt(app, idx, &path, kind, head),
+                None => Attempt::Failed,
+            };
+            match result {
                 Attempt::Hit(resp) => return respond(req, resp),
                 Attempt::Miss => break,
                 Attempt::Failed => {}
@@ -362,14 +375,33 @@ fn forward(app: &App, req: Request, kind: RequestKind) {
 /// just the request; on a miss or failure it is released before the next
 /// upstream is tried.
 ///
-/// shortcut: a request waiting here sends Nix nothing, so a wait past Nix's
-/// `stalled-download-timeout` (300 s) aborts it and Nix retries; revisit if a
-/// low cap with a large closure makes that common.
-fn upstream_slot(app: &App, idx: usize, kind: RequestKind) -> Option<Slot<'_>> {
+/// `Some(None)` means no cap applies. `None` means the upstream is marked down
+/// and its cap is full, on arrival or when a slot frees up: the caller skips
+/// the attempt. Waiting would only queue the request behind connect timeouts
+/// to a host that is likely unreachable, with Nix seeing no bytes meanwhile;
+/// with a free slot the attempt still goes ahead, since a probe verdict can be
+/// stale during a flap.
+///
+/// shortcut: a request waiting on a healthy upstream sends Nix nothing, so a
+/// wait past Nix's `stalled-download-timeout` (300 s) aborts it and Nix
+/// retries; revisit if a low cap with a large closure makes that common.
+fn upstream_slot(app: &App, idx: usize, kind: RequestKind) -> Option<Option<Slot<'_>>> {
     if kind != RequestKind::Nar {
-        return None;
+        return Some(None);
     }
-    app.upstream_slots[idx].as_ref().map(Slots::acquire)
+    match &app.upstream_slots[idx] {
+        None => Some(None),
+        Some(slots) => {
+            let slot = slots.acquire_unless(|| app.registry.is_down(idx));
+            if slot.is_none() {
+                tracing::info!(
+                    url = slots.scope,
+                    "upstream down and its NAR slots busy, skipping"
+                );
+            }
+            slot.map(Some)
+        }
+    }
 }
 
 /// Extra tries at a failed affinity upstream, [`AFFINITY_RETRY_DELAY`] apart:
@@ -683,24 +715,34 @@ impl Slots {
 
     /// Take a slot, blocking until one frees up. Blocking rather than
     /// rejecting is the point: Nix sees a slow proxy instead of a failing one.
-    /// A wait past [`SLOT_WAIT_WARN`] is logged once, since a cap that stays
-    /// full usually means transfers are stuck, not busy.
     fn acquire(&self) -> Slot<'_> {
-        let full = |used: &mut usize| *used >= self.max;
-        let (mut used, wait) = self
+        self.acquire_unless(|| false).expect("never gives up")
+    }
+
+    /// Take a slot, blocking until one frees up, unless `give_up` holds while
+    /// none is free: then `None`, without waiting further. `give_up` is checked
+    /// on arrival and each time a slot frees up. A wait past
+    /// [`SLOT_WAIT_WARN`] is logged once, since a cap that stays full usually
+    /// means transfers are stuck, not busy.
+    fn acquire_unless(&self, give_up: impl Fn() -> bool) -> Option<Slot<'_>> {
+        let mut wait = |used: &mut usize| *used >= self.max && !give_up();
+        let (mut used, res) = self
             .freed
-            .wait_timeout_while(self.used.lock().unwrap(), SLOT_WAIT_WARN, full)
+            .wait_timeout_while(self.used.lock().unwrap(), SLOT_WAIT_WARN, &mut wait)
             .unwrap();
-        if wait.timed_out() {
+        if res.timed_out() {
             tracing::warn!(
                 max = self.max,
                 scope = self.scope,
                 "all NAR slots busy, waiting"
             );
-            used = self.freed.wait_while(used, full).unwrap();
+            used = self.freed.wait_while(used, &mut wait).unwrap();
+        }
+        if *used >= self.max {
+            return None;
         }
         *used += 1;
-        Slot(self)
+        Some(Slot(self))
     }
 
     fn used(&self) -> usize {
@@ -716,7 +758,9 @@ struct Slot<'a>(&'a Slots);
 impl Drop for Slot<'_> {
     fn drop(&mut self) {
         *self.0.used.lock().unwrap() -= 1;
-        self.0.freed.notify_one();
+        // All, not one: once the upstream is down, every waiter must wake to
+        // give up, not stay queued behind whichever one takes this slot.
+        self.0.freed.notify_all();
     }
 }
 
@@ -749,4 +793,63 @@ fn text(code: u16, body: &str) -> Response<std::io::Cursor<Vec<u8>>> {
 /// stack, so this cannot fire.
 fn header(name: &str, value: &str) -> Header {
     Header::from_bytes(name.as_bytes(), value.as_bytes()).expect("static header")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+
+    #[test]
+    fn down_upstream_with_busy_slot_does_not_wait() {
+        let slots = Slots::new(1, "test");
+        let _held = slots.acquire();
+        let start = Instant::now();
+        assert!(slots.acquire_unless(|| true).is_none());
+        assert!(start.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn down_upstream_with_free_slot_is_still_tried() {
+        let slots = Slots::new(1, "test");
+        assert!(slots.acquire_unless(|| true).is_some());
+    }
+
+    #[test]
+    fn healthy_upstream_waits_for_its_slot() {
+        let slots = Slots::new(1, "test");
+        std::thread::scope(|s| {
+            let held = slots.acquire();
+            let start = Instant::now();
+            s.spawn(move || {
+                std::thread::sleep(Duration::from_millis(100));
+                drop(held);
+            });
+            assert!(slots.acquire_unless(|| false).is_some());
+            assert!(start.elapsed() >= Duration::from_millis(100));
+        });
+    }
+
+    #[test]
+    fn queue_drains_once_upstream_goes_down() {
+        // Three requests queued behind a connect attempt; the attempt fails,
+        // marks the upstream down and frees the slot. The freed slot goes to
+        // one waiter, the rest give up instead of queueing behind it.
+        let slots = Slots::new(1, "test");
+        let down = AtomicBool::new(false);
+        let got = std::thread::scope(|s| {
+            let held = slots.acquire();
+            let waiters: Vec<_> = (0..3)
+                .map(|_| s.spawn(|| slots.acquire_unless(|| down.load(Ordering::SeqCst))))
+                .collect();
+            std::thread::sleep(Duration::from_millis(100));
+            down.store(true, Ordering::SeqCst);
+            drop(held);
+            let got: Vec<_> = waiters.into_iter().map(|w| w.join().unwrap()).collect();
+            got.iter().filter(|g| g.is_some()).count()
+        });
+        assert_eq!(got, 1);
+        assert_eq!(slots.used(), 0);
+    }
 }

@@ -66,7 +66,9 @@ pub trait SelectionEngine: Send + Sync {
 /// first even when marked down. A narinfo `URL:` is relative to the cache that
 /// served it, so that upstream is usually the only one that can have the NAR,
 /// and a probe verdict can be seconds stale during a flap. Trying it costs at
-/// most a connect timeout.
+/// most a connect timeout, and only while the upstream has a NAR slot free:
+/// the proxy skips a down upstream whose own `max-inflight` is full rather
+/// than queue requests behind it.
 pub struct DefaultEngine;
 
 impl SelectionEngine for DefaultEngine {

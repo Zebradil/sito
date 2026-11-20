@@ -65,6 +65,9 @@ the path locally.
 A narinfo's `URL:` field is relative to the cache that served it, so that cache is usually the only one that can serve
 the NAR under that path. sito remembers which upstream answered each narinfo and tries it first for the NAR that
 follows. It goes first even when a probe marks it down, because a probe verdict can be seconds stale during a flap.
+That costs at most a connect timeout per try, and only one request at a time pays it when the upstream sets its own
+`max-inflight`: while the upstream is marked down and its slots are full, sito skips the try instead of queueing for
+a slot.
 
 Affinity is a preference, not a pin. If the remembered upstream misses, the walk continues through the tiers. If it
 *fails* and the rest of the walk finds nothing, sito retries it 3 times, 5 s apart, before answering 404. It answers
