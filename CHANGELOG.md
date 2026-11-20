@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.6.1](https://github.com/Zebradil/sito/compare/v0.6.0...v0.6.1) (2026-11-20)
+
+
+### Fixes
+
+* **deps:** update docs-kit to v0.11.1 ([#54](https://github.com/Zebradil/sito/issues/54)) ([f103266](https://github.com/Zebradil/sito/commit/f1032667fe37286eaf20666dad503acf8036e017))
+* **deps:** update docs-kit to v0.12.0 ([#65](https://github.com/Zebradil/sito/issues/65)) ([09fa7b3](https://github.com/Zebradil/sito/commit/09fa7b35330b13e6bfd144ca158a88a19c4b1b7c))
+* **proxy:** skip down upstreams with full NAR slots instead of queueing ([#69](https://github.com/Zebradil/sito/issues/69)) ([42caef9](https://github.com/Zebradil/sito/commit/42caef9a98979110a166d64a97a74f5f7a842538))
+
+
+### Documentation
+
+* count docs site visitors with Umami ([#56](https://github.com/Zebradil/sito/issues/56)) ([2703bef](https://github.com/Zebradil/sito/commit/2703befe7fd32b0b7de3a04351c7e07fd0cd57f9))
+* install docs-kit from npm ([#58](https://github.com/Zebradil/sito/issues/58)) ([6f2bc45](https://github.com/Zebradil/sito/commit/6f2bc45880da3875762ca58e6ba15a0ee84b3b75))
+* publish docs of past releases with docs-kit 0.11.0 ([#60](https://github.com/Zebradil/sito/issues/60)) ([7970a8b](https://github.com/Zebradil/sito/commit/7970a8b5fbbd80cdad640e296caa1b036afa2f24))
+* use remote site.yaml schema URL ([#64](https://github.com/Zebradil/sito/issues/64)) ([572457e](https://github.com/Zebradil/sito/commit/572457ef4729b7ac9e73c180429bdbb1cebea804))
+
 ## [0.6.0](https://github.com/Zebradil/sito/compare/v0.5.0...v0.6.0) (2026-11-02)
 
 
