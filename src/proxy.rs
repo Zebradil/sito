@@ -541,6 +541,7 @@ fn substitute(app: &App, idx: usize, target: &NarTarget) -> Result<(String, Code
 /// away. A HEAD answer carries the upstream's `Content-Length` only when
 /// nothing is decompressed.
 fn attempt_nar(app: &App, idx: usize, path: &str, codec: Codec, head: bool) -> Attempt {
+    let start = Instant::now();
     let (upstream, _) = match call(app, idx, path, RequestKind::Nar, head) {
         Ok(r) => r,
         Err(a) => return a,
@@ -569,7 +570,7 @@ fn attempt_nar(app: &App, idx: usize, path: &str, codec: Codec, head: bool) -> A
         prober: app.prober.clone(),
         idx,
         url: url.clone(),
-        start: Instant::now(),
+        start,
         bytes: 0,
         eof: false,
         failed: false,
