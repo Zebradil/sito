@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.7.0](https://github.com/Zebradil/sito/compare/v0.6.1...v0.7.0) (2026-11-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* **proxy:** narinfos are no longer relayed byte for byte, and NARs reach Nix decompressed. The `affinity_entries` field of /status and the `sito_affinity_entries` metric are removed. Narinfos Nix cached before this release keep their old URLs for up to 30 days; to drop them at once, set `q="DELETE FROM NARs WHERE cache IN (SELECT id FROM BinaryCaches WHERE url = 'http://127.0.0.1:5001')"`, then run `sudo find /root/.cache/nix /var/root/.cache/nix -maxdepth 1 -name 'binary-cache-*.sqlite' -exec sqlite3 {} "$q" \;` and `find ~/.cache/nix -maxdepth 1 -name 'binary-cache-*.sqlite' -exec sqlite3 {} "$q" \;` END_COMMIT_OVERRIDE
+
+### Features
+
+* **proxy:** serve NARs from any upstream holding the same NarHash ([#72](https://github.com/Zebradil/sito/issues/72)) ([4d356f2](https://github.com/Zebradil/sito/commit/4d356f237c6977d25994b923d70c2721ccdfc046))
+
 ## [0.6.1](https://github.com/Zebradil/sito/compare/v0.6.0...v0.6.1) (2026-11-20)
 
 
