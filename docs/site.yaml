@@ -29,7 +29,7 @@ features:
   - title: Ranking from real traffic # guessed: condensed from README "Shape" and src/probe.rs
     body: Upstreams are ranked from passive traffic metrics plus timed `/nix-cache-info` reachability probes.
   - title: Trust stays in Nix # guessed: condensed from README "Shape"
-    body: Narinfos pass through unmodified and sito holds no keys; the Nix client verifies signatures as before.
+    body: sito holds no keys and leaves signatures untouched; the Nix client verifies every narinfo and NAR as before.
   - title: Inspectable ranking # guessed: condensed from README "Shape"
     body: A `/status` JSON endpoint exposes what the ranker sees for every upstream, and `/metrics` keeps it graphable over time, even from a roaming laptop.
   - title: NixOS and nix-darwin modules # guessed: condensed from README module section
@@ -52,7 +52,7 @@ cascade:
       note: The box failed its last `GET /nix-cache-info` probe, so the plan never dials it and no connect timeout is paid. Back home, the next probe brings it back.
       states:
         box: { state: down, text: last probe timed out }
-        remote: { state: hit, text: narinfo relayed unmodified }
+        remote: { state: hit, text: "narinfo relayed, signature intact" }
         nixos: { state: idle, text: tier 1 hit }
     - label: At home
       note: On the LAN the box answers fastest, so it ranks first in its tier and the request never leaves the house.

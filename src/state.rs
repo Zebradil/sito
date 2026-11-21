@@ -1,9 +1,8 @@
-//! In-memory upstream state: health, quality EWMAs, NAR affinity.
+//! In-memory upstream state: health and quality EWMAs.
 //!
 //! Cold start by design (ADR-0004): nothing persists, rank falls back to
 //! config order until probes and traffic fill the numbers in.
 
-use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Instant;
 
@@ -13,11 +12,6 @@ use serde::{Deserialize, Serialize};
 /// with the accumulated history. Roughly a five-sample memory — fast enough
 /// to follow a network change, slow enough to ignore a single slow response.
 const EWMA_ALPHA: f64 = 0.3;
-
-/// How many narinfo→upstream affinity entries to hold before dropping them
-/// all. Affinity metadata only, not response caching (ADR-0002 still holds).
-// ponytail: clear-all eviction; switch to LRU if churn ever thrashes it.
-const AFFINITY_CAP: usize = 4096;
 
 /// Fold a new sample into an exponentially weighted moving average.
 ///
@@ -115,8 +109,9 @@ pub struct UpstreamSnapshot {
     /// [`NAR_BYTES_PER_SEC_BOUNDS`].
     #[serde(skip)]
     pub nar_bytes_per_sec: Histogram,
-    /// NAR body bytes passed to clients, counted as they flow, so transfers
-    /// that broke off or were abandoned count too.
+    /// NAR body bytes received from this upstream, before decompression,
+    /// counted as they flow, so transfers that broke off or were abandoned
+    /// count too.
     pub nar_bytes: u64,
 }
 
@@ -135,7 +130,6 @@ pub struct UpstreamSnapshot {
 /// outcome.
 pub struct Registry {
     upstreams: Mutex<Vec<UpstreamSnapshot>>,
-    affinity: Mutex<HashMap<String, usize>>,
     /// Process start, as reported by `/status` uptime.
     pub started: Instant,
 }
@@ -158,7 +152,6 @@ impl Registry {
         }
         Registry {
             upstreams: Mutex::new(ups),
-            affinity: Mutex::new(HashMap::new()),
             started: Instant::now(),
         }
     }
@@ -206,7 +199,7 @@ impl Registry {
         });
     }
 
-    /// NAR bytes on their way to a client.
+    /// NAR bytes received from an upstream, before decompression.
     pub fn record_nar_bytes(&self, index: usize, n: u64) {
         self.with(index, |u| u.nar_bytes += n);
     }
@@ -249,34 +242,6 @@ impl Registry {
     pub fn is_down(&self, index: usize) -> bool {
         self.with(index, |u| u.healthy == Some(false))
     }
-
-    /// Remember which upstream served the narinfo that named `nar_path`, so
-    /// the NAR request that follows goes to the same place — narinfo `URL:`
-    /// fields are relative to their own cache, so another upstream's copy is
-    /// not addressable by that path (ADR-0003).
-    ///
-    /// `nar_path` is stored exactly as the narinfo wrote it, without a
-    /// leading slash. At `AFFINITY_CAP` entries the whole map is dropped,
-    /// which costs at most one extra tier walk per forgotten NAR.
-    pub fn set_affinity(&self, nar_path: String, index: usize) {
-        let mut map = self.affinity.lock().unwrap();
-        if map.len() >= AFFINITY_CAP {
-            map.clear();
-        }
-        map.insert(nar_path, index);
-    }
-
-    /// The upstream remembered for `nar_path`, or `None` if it was never
-    /// recorded or has since been evicted. `None` is not an error: selection
-    /// falls back to the normal tier walk.
-    pub fn affinity(&self, nar_path: &str) -> Option<usize> {
-        self.affinity.lock().unwrap().get(nar_path).copied()
-    }
-
-    /// Live affinity entries, for `/status`.
-    pub fn affinity_len(&self) -> usize {
-        self.affinity.lock().unwrap().len()
-    }
 }
 
 #[cfg(test)]
@@ -298,18 +263,6 @@ mod tests {
         }
         assert_eq!(h.buckets, [2, 1, 0, 0, 0, 0, 0, 0, 1]);
         assert_eq!(h.count, 4);
-    }
-
-    #[test]
-    fn affinity_cap_clears() {
-        let reg = Registry::new(&[vec!["http://a".into()]]);
-        for i in 0..AFFINITY_CAP {
-            reg.set_affinity(format!("nar/{i}"), 0);
-        }
-        assert_eq!(reg.affinity_len(), AFFINITY_CAP);
-        reg.set_affinity("nar/one-more".into(), 0);
-        assert_eq!(reg.affinity_len(), 1);
-        assert_eq!(reg.affinity("nar/one-more"), Some(0));
     }
 
     #[test]

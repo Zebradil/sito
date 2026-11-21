@@ -40,8 +40,9 @@ In this repository:
 - Upstreams are configured in ordered **tiers**, each with a selection
   strategy (`sequential` now, `race` reserved).
 - Ranking from passive traffic metrics plus active reachability probes.
-- Trust stays in the Nix client: narinfos pass through unmodified, sito holds
-  no keys.
+- Trust stays in the Nix client: sito holds no keys and leaves signatures
+  untouched. It rewrites a narinfo's unsigned `URL:` so any upstream holding
+  the same NAR can serve it, and serves NARs decompressed.
 - `/status` JSON endpoint exposes what the ranker sees
   ([field reference](https://zebradil.github.io/sito/guides/troubleshooting/#3-read-status)),
   and `/metrics` serves the same numbers to Prometheus-compatible scrapers
@@ -133,7 +134,7 @@ $ nix flake check -L              # what CI's build job builds: fmt, clippy,
 ```
 
 `tests/e2e.rs` starts real mock upstreams and a real sito on ephemeral ports —
-tier fallback, affinity, dead upstreams and the read-only surface are covered
+tier fallback, NAR URL rewriting and substitution, dead upstreams and the read-only surface are covered
 there rather than with mocks. The docs site lives in `docs/` (docs-kit); build
 it with `npm ci && npm run build` from there.
 

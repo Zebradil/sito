@@ -150,7 +150,7 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 5,
+        "w": 7,
         "x": 0,
         "y": 1
       },
@@ -194,8 +194,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 5,
-        "x": 5,
+        "w": 7,
+        "x": 7,
         "y": 1
       },
       "targets": [
@@ -237,49 +237,6 @@
         "textMode": "value_and_name"
       },
       "description": "NAR transfers in flight, out of max-inflight."
-    },
-    {
-      "type": "stat",
-      "title": "Affinity entries",
-      "id": 4,
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 10,
-        "y": 1
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sito_affinity_entries{host=~\"$host\"}",
-          "legendFormat": "{{host}}",
-          "refId": "A",
-          "instant": true,
-          "range": false
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
-        },
-        "colorMode": "none",
-        "graphMode": "none",
-        "textMode": "value_and_name"
-      },
-      "description": "NAR paths remembered with the upstream that served their narinfo."
     },
     {
       "type": "stat",

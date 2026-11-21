@@ -84,8 +84,8 @@ copying path '/nix/store/mgc3m5ad39b84vkdrca6zd9jan5a28c2-hello-2.12.3' from 'ht
 ```
 
 The store paths and the number of paths depend on your platform and nixpkgs revision. Nix accepted them because they
-carry `cache.nixos.org`'s signature and Nix trusts that key by default. sito passed the bytes through unmodified and
-holds no keys of its own.
+carry `cache.nixos.org`'s signature and Nix trusts that key by default. sito left the signatures untouched and holds no
+keys of its own.
 
 ## 4. Read what sito measured
 

@@ -7,14 +7,16 @@
 //!
 //! The pieces: [`config`] parses the tiers of upstreams, [`state::Registry`]
 //! holds their live health and quality signals, [`probe`] keeps reachability
-//! fresh, [`select`] turns that state into an ordered selection plan, and
-//! [`proxy`] streams the chosen upstream's bytes through unmodified.
+//! fresh, [`select`] turns that state into an ordered selection plan,
+//! [`narinfo`] rewrites narinfos so any upstream holding the same NAR can
+//! serve it, and [`proxy`] streams the chosen upstream's bytes through.
 //!
 //! Vocabulary (upstream, tier, strategy, selection plan, quality signal,
 //! probe, pass-through) is defined in `CONTEXT.md`; the rationale for each
 //! design choice lives in `docs/adr/`.
 
 pub mod config;
+pub mod narinfo;
 pub mod probe;
 pub mod proxy;
 pub mod select;
@@ -89,6 +91,12 @@ pub fn build(cfg: &config::Config) -> Result<(Arc<App>, Server)> {
         engine: Box::new(DefaultEngine),
         prober,
         tiers,
+        upstream_keys: cfg
+            .tiers
+            .iter()
+            .flat_map(|t| &t.upstreams)
+            .map(|u| narinfo::upstream_key(&u.url))
+            .collect(),
         info_agent,
         nar_agent,
         nar_slots: proxy::Slots::new(cfg.max_inflight, "global"),

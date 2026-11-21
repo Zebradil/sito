@@ -47,28 +47,31 @@ There is no async runtime. sito runs three kinds of threads:
 - **The probe thread** probes every upstream in turn, then sleeps for `probe-interval-secs`. A failed request cuts the
   sleep short.
 
-All shared state sits in one registry: per-upstream health, moving averages and counters behind one lock, and the NAR
-affinity map behind another. Readers take a copy, so no lock is held across a network call.
+All shared state sits in one registry: per-upstream health, moving averages and counters behind one lock. Readers take
+a copy, so no lock is held across a network call.
 
 ## A request, end to end
 
-1. The worker copies the registry and assembles the selection input: request kind and path, the affinity upstream for
-   a NAR, and every tier's upstream state.
+1. The worker copies the registry and assembles the selection input: request kind and path, the affinity upstream a
+   NAR URL names, and every tier's upstream state.
 2. The engine returns the plan, for example upstreams `[2, 0, 3]`.
 3. The worker tries each in turn. A 404 counts a miss and moves on. A connection error, timeout, error status other
    than 404, or a body that fails before its first byte counts an error, marks the upstream down, starts a probe pass,
    and moves on.
 4. The first upstream that answers with a body wins; no other upstream is asked. For a narinfo, sito records its
-   latency and remembers the upstream for the NAR its `URL:` field names.
-5. sito relays the response: the upstream's status code and `Content-Type`, and the body byte for byte.
+   latency and rewrites its `URL:` to name that upstream. For a NAR, an upstream other than the affinity upstream
+   first answers a narinfo lookup, and counts only if its `NarHash` matches.
+5. sito relays the response: the upstream's status code and `Content-Type`, the rewritten narinfo, or the NAR
+   decompressed.
 
 Upstreams are numbered `0..n` in config order across all tiers: tier 0's upstreams first, then tier 1's. That number is
-the upstream's identity in the plan, the affinity map, and `/status`.
+the upstream's identity in the plan and `/status`. NAR URLs name an upstream by a hash of its URL instead, since Nix
+keeps them for weeks and the numbers shift when an upstream is added.
 
 ### What is and is not relayed
 
-- Only `Content-Type` is copied from the upstream's headers. A narinfo carries the `Content-Length` of what sito sends;
-  a `HEAD` answer carries the upstream's `Content-Length` and no body.
+- Only `Content-Type` is copied from the upstream's headers. A narinfo carries the `Content-Length` of what sito sends.
+  A `HEAD` answer has no body, and carries the upstream's `Content-Length` only for a NAR sito would not decompress.
 - NARs go out chunked, without `Content-Length`. sito cannot close a client connection mid-response, so with a fixed
   length a broken transfer would leave Nix waiting until its own stall timeout. A chunked body just ends, and Nix
   rejects the short NAR at once.
@@ -77,8 +80,8 @@ the upstream's identity in the plan, the affinity map, and `/status`.
 
 ### Waiting for the first byte
 
-sito sends nothing to Nix until a NAR's first body chunk has arrived. An upstream that sends headers and then stalls
-therefore still falls through to the next one. Once bytes have gone out there is no switching: if the upstream breaks
+sito sends nothing to Nix until a NAR's first decompressed bytes are in. An upstream that sends headers and then stalls,
+or sends something that does not decompress, therefore still falls through to the next one. Once bytes have gone out there is no switching: if the upstream breaks
 off or goes 60 s without sending, sito records an error and ends the body.
 
 ## HTTP clients
@@ -93,8 +96,8 @@ sito uses separate HTTP clients with deliberately different timeouts:
 
 ## What sito deliberately does not do
 
-- **Cache.** The Nix client already caches narinfo lookups; a second layer would only hide staleness. The affinity map
-  is metadata, not a response cache.
+- **Cache.** The Nix client already caches narinfo lookups; a second layer would only hide staleness. Which upstream
+  served a narinfo travels in its rewritten `URL:`, so sito keeps no map of it.
 - **Write.** `nix copy --to` through sito is not proxied.
 - **Handle signatures.** No keys, no verification, no re-signing; see [Trust model](../trust/).
 - **Persist.** Every start is a cold start.

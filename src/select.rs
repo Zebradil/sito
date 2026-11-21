@@ -13,7 +13,8 @@ use crate::state::UpstreamSnapshot;
 #[serde(rename_all = "kebab-case")]
 pub enum RequestKind {
     /// `/<hash>.narinfo` — small metadata lookup, timed as the ranking
-    /// signal, and the request whose answer establishes NAR affinity.
+    /// signal, and the request whose rewritten answer names the NAR's
+    /// affinity upstream.
     Narinfo,
     /// `/nar/…` — the store path payload; potentially huge, streamed.
     Nar,
@@ -27,7 +28,8 @@ pub struct SelectionInput {
     pub kind: RequestKind,
     /// Request path as received, leading slash included.
     pub path: String,
-    /// Upstream that served the narinfo naming this NAR, when known.
+    /// Upstream that served the narinfo naming this NAR, when the NAR URL
+    /// says so and that upstream is still configured (ADR-0009).
     pub affinity: Option<usize>,
     /// Tiers in config order — index 0 is the tier to try first.
     pub tiers: Vec<TierInput>,
@@ -63,12 +65,12 @@ pub trait SelectionEngine: Send + Sync {
 /// down are skipped entirely — the probe loop owns bringing them back.
 ///
 /// The affinity upstream is the one exception to the health gate: it goes
-/// first even when marked down. A narinfo `URL:` is relative to the cache that
-/// served it, so that upstream is usually the only one that can have the NAR,
-/// and a probe verdict can be seconds stale during a flap. Trying it costs at
-/// most a connect timeout, and only while the upstream has a NAR slot free:
-/// the proxy skips a down upstream whose own `max-inflight` is full rather
-/// than queue requests behind it.
+/// first even when marked down. It is the only upstream that can serve the
+/// NAR without a second narinfo lookup, and the only one sure to hold that
+/// exact NAR, and a probe verdict can be seconds stale during a flap. Trying
+/// it costs at most a connect timeout, and only while the upstream has a NAR
+/// slot free: the proxy skips a down upstream whose own `max-inflight` is
+/// full rather than queue requests behind it.
 pub struct DefaultEngine;
 
 impl SelectionEngine for DefaultEngine {
