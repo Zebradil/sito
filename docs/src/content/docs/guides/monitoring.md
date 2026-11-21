@@ -140,13 +140,12 @@ shape.
 | Metric | Type | Meaning |
 | --- | --- | --- |
 | `sito_uptime_seconds` | gauge | Seconds since sito started. |
-| `sito_affinity_entries` | gauge | As `affinity_entries` in `/status`. |
 | `sito_nar_slots_used`, `sito_nar_slots_max` | gauge | As `nar_slots` in `/status`. |
 | `sito_upstream_healthy` | gauge | `1` or `0`; absent until the first probe answers. |
 | `sito_upstream_requests_total` | counter | Requests per upstream, by `result`: `hit`, `miss` or `error`. |
 | `sito_upstream_narinfo_seconds` | histogram | Narinfo latency, request to response headers. Buckets from 10 ms to 2.5 s. |
 | `sito_upstream_nar_bytes_per_second` | histogram | Throughput of completed NAR transfers. Buckets from 0.5 MB/s to 100 MB/s. |
-| `sito_upstream_nar_bytes_total` | counter | NAR body bytes passed to clients, including transfers that broke off. |
+| `sito_upstream_nar_bytes_total` | counter | NAR body bytes received from upstreams, before decompression, including transfers that broke off. |
 | `sito_upstream_probe_ewma_seconds` | gauge | `probe_ms`, in seconds. |
 | `sito_upstream_narinfo_ewma_seconds` | gauge | `narinfo_ms`, in seconds. |
 | `sito_upstream_nar_ewma_bytes_per_second` | gauge | `nar_mbytes_per_sec`, in bytes per second. |

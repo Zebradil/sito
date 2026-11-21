@@ -51,7 +51,7 @@ Rationale: [ADR-0004](https://github.com/Zebradil/sito/blob/main/docs/adr/0004-q
 
 The built-in engine applies four rules:
 
-1. **Affinity first.** For a NAR, the upstream that served the narinfo naming it goes first, even when marked down.
+1. **Affinity first.** For a NAR, the upstream that served its narinfo goes first, even when marked down.
 2. **Tier order.** Tiers in config order, never reordered across tiers.
 3. **Rank within a tier.** Ascending `narinfo_ms`, falling back to `probe_ms`. Upstreams with neither sort last and
    keep config order among themselves.
@@ -60,21 +60,38 @@ The built-in engine applies four rules:
 An empty plan, when everything is down, is a 404 without asking anyone. Nix then tries its next substituter or builds
 the path locally.
 
-### NAR affinity
+### NAR affinity and substitutes
 
-A narinfo's `URL:` field is relative to the cache that served it, so that cache is usually the only one that can serve
-the NAR under that path. sito remembers which upstream answered each narinfo and tries it first for the NAR that
-follows. It goes first even when a probe marks it down, because a probe verdict can be seconds stale during a flap.
-That costs at most a connect timeout per try, and only one request at a time pays it when the upstream sets its own
-`max-inflight`: while the upstream is marked down and its slots are full, sito skips the try instead of queueing for
-a slot.
+A narinfo's `URL:` field is relative to the cache that served it, and Nix keeps narinfos for up to 30 days. A NAR
+request can therefore arrive long after its narinfo: after sito restarted, or while the upstream that served it is
+unreachable. So sito rewrites the `URL:` of every narinfo it relays into a self-describing one:
 
-Affinity is a preference, not a pin. If the remembered upstream misses, the walk continues through the tiers. If it
-*fails* and the rest of the walk finds nothing, sito retries it 3 times, 5 s apart, before answering 404. It answers
-404 rather than a 5xx on purpose: once Nix's own retries run out, a failed NAR download fails the whole build unless
+```text
+URL: nar/sito/v1/<upstream key>/<store hash>/<NarHash>/<codec>/<original URL>
+Compression: none
+```
+
+The upstream key is a hash of the upstream's configured URL. When the NAR request comes, the upstream it names goes
+first, at the original URL. It goes first even when a probe marks it down, because a probe verdict can be seconds stale
+during a flap. That costs at most a connect timeout per try, and only one request at a time pays it when the upstream
+sets its own `max-inflight`: while the upstream is marked down and its slots are full, sito skips the try instead of
+queueing for a slot.
+
+Affinity is a preference, not a pin. If that upstream misses or fails, sito asks the rest of the plan for the narinfo
+of the same store path. The first upstream whose `NarHash` matches holds the same NAR, and serves it from its own URL in
+its own compression. A different `NarHash`, from a build that is not reproducible, never stands in. If the affinity
+upstream *failed* and no substitute turns up, sito retries it 3 times, 5 s apart, before answering 404. It answers 404
+rather than a 5xx on purpose: once Nix's own retries run out, a failed NAR download fails the whole build unless
 `--fallback` is set, while a 404 lets Nix build that one path locally.
 
-sito remembers up to 4096 paths, then forgets them all at once; a forgotten path costs one ordinary tier walk.
+Every NAR reaches Nix decompressed, which is what lets an `xz` copy stand in for a `zstd` or uncompressed one. sito
+decodes `xz` and `zstd`; a narinfo in any other compression is relayed unmodified, and its NAR fetched from each
+upstream in turn under its original path. So is a NAR path from a narinfo Nix cached before sito rewrote narinfos.
+
+The URL carries everything, so sito keeps no state for this, and a restart loses nothing. If an upstream's configured
+URL changes, NAR URLs naming the old one simply have no affinity upstream, and every upstream is asked for a
+substitute.
+Rationale: [ADR-0009](https://github.com/Zebradil/sito/blob/main/docs/adr/0009-self-describing-nar-urls.md).
 
 ## The selection boundary
 

@@ -1,10 +1,10 @@
 ---
 title: Trust model
-description: sito holds no keys and relays signatures unchanged; the Nix client verifies everything, as it would without sito.
+description: sito holds no keys and leaves signatures untouched; the Nix client verifies everything, as it would without sito.
 ---
 
-sito relays narinfo and NAR bytes **unmodified**. It never signs, re-signs, or strips a signature, and holds no key
-material. The Nix client verifies each narinfo's signature against its own `trusted-public-keys`, exactly as it would
+sito never signs, re-signs, or strips a signature, and holds no key material. The Nix client verifies each narinfo's
+signature against its own `trusted-public-keys`, and each NAR against the narinfo's `NarHash`, exactly as it would
 talking to the upstream directly.
 
 This keeps sito out of the trust chain. A broken or compromised sito can deny service or pick a slow upstream. It
@@ -24,11 +24,26 @@ Everything else is either relayed from an upstream (`*.narinfo`, `/nar/*`) or a 
 body: 404 for an unknown path or an exhausted plan, 405 for any method other than `GET` and `HEAD`.
 
 Relayed responses keep the upstream's status and `Content-Type`, and add one header of sito's own:
-`X-Sito-Upstream`, the configured URL of the upstream that answered. The body is untouched.
+`X-Sito-Upstream`, the configured URL of the upstream that answered.
 
-A narinfo is read into memory, up to 1 MiB, so sito can remember its `URL:` field for affinity. The bytes sent on are
-still exactly the bytes received. A larger narinfo goes out truncated and Nix rejects it as malformed; real ones are
-well under a kilobyte.
+## What sito changes, and why that is safe
+
+sito rewrites each narinfo it relays (see [NAR affinity and substitutes](../selection/#nar-affinity-and-substitutes)):
+
+- `URL:` becomes a self-describing NAR URL under `nar/sito/v1/`.
+- `Compression:` becomes `none`, and sito serves the NAR decompressed.
+- `FileHash:` and `FileSize:`, which describe the compressed file, are dropped.
+
+Every other line is relayed as received, `Sig:` included. A narinfo signature covers only the store path, `NarHash`,
+`NarSize` and references, so none of the rewritten fields are signed, and Nix still checks every NAR it receives
+against the signed `NarHash`. A NAR from a substitute upstream is used only when that upstream's narinfo carries the
+same `NarHash`, and Nix checks the bytes anyway.
+
+A narinfo sito cannot rewrite is relayed unmodified: one in a compression sito does not decode (only `xz`, `zstd` and
+`none` are), one with an absolute `URL:`, or one without a `NarHash`.
+
+A narinfo is read into memory, up to 1 MiB. A larger one goes out truncated and Nix rejects it as malformed; real ones
+are well under a kilobyte.
 
 ## Where the keys come from
 

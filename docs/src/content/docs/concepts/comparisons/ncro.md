@@ -19,10 +19,10 @@ about ncro here was measured by running it.
 | Upstream model | Ordered tiers, tried one after another; `race` parses in the config but is rejected until built | Flat list plus `priority` to break ties within 10% latency, plus a separate `fallback_cache` |
 | narinfo selection | Tries upstreams in rank order, one request at a time | On a route-cache miss, sends `HEAD` to **every** healthy upstream at once; the fastest wins |
 | Ranking signal | Measured narinfo latency first, probe latency as fallback, NAR throughput tracked. Probes every ~15 s, and at once after a failure | EMA of probe latency, probes every 30 s. 15 s cooldown on transient errors |
-| NAR routing | Remembers, in memory, which upstream served the narinfo and asks it first | Route stored in SQLite; if the first upstream sends no byte within 1 s, a second request starts in parallel (hedging) |
+| NAR routing | Rewrites the narinfo `URL:` to name the upstream that served it, asks that one first, and falls back to any upstream whose narinfo has the same `NarHash` | Route stored in SQLite; if the first upstream sends no byte within 1 s, a second request starts in parallel (hedging) |
 | Persistence | None; every start is cold | SQLite: routes (default TTL 1 h, LRU limit 100k), misses (10 min), health snapshots |
-| narinfo caching | None; bytes relayed unmodified | Caches the **narinfo body** and serves warm hits without asking any upstream |
-| Trust | Pass-through, holds no keys | Checks narinfo signatures against each upstream's keys and **rewrites the `URL:` line** (modes `Keep`, `ToSelf`, `ToUpstream`) |
+| narinfo caching | None; every narinfo is fetched from an upstream | Caches the **narinfo body** and serves warm hits without asking any upstream |
+| Trust | Holds no keys; rewrites only unsigned narinfo fields (`URL:`, `Compression:`, `FileHash:`, `FileSize:`) | Checks narinfo signatures against each upstream's keys and **rewrites the `URL:` line** (modes `Keep`, `ToSelf`, `ToUpstream`) |
 | Auth | None yet; `netrc` planned | `netrc`, per-upstream username and password in config, `s3://` upstreams |
 | Extras | `/status` JSON, `/metrics` (Prometheus), `X-Sito-Upstream` response header | `/metrics` (Prometheus), `/health`, `/status`, `X-Ncro-Upstream` and `X-Ncro-Route` response headers, path filters per upstream, mDNS discovery, signed UDP gossip between nodes, a Grafana dashboard |
 

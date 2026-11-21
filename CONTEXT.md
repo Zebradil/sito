@@ -51,6 +51,18 @@ immediately after a request failure. Answers "is this upstream reachable right
 now", which is the whole roaming problem.
 
 **Pass-through**:
-sito's trust model: narinfo and NAR bytes are relayed unmodified, signature
-verification stays in the Nix client, sito holds no signing keys. The only
-response sito authors itself is its own `/nix-cache-info`.
+sito's trust model: signature verification stays in the Nix client and sito
+holds no signing keys. sito rewrites only a narinfo's unsigned fields (see
+self-describing NAR URL) and never touches its signatures.
+
+**Self-describing NAR URL**:
+The `URL:` sito writes into each narinfo it relays: it names the upstream
+that served the narinfo, the store path, the `NarHash` and the original URL,
+so sito can serve the NAR later without remembering anything, from that
+upstream or from any other whose narinfo carries the same `NarHash`. NARs
+reach Nix decompressed.
+
+**NAR affinity**:
+The upstream a self-describing NAR URL names. It is asked first, even when
+marked down; the others are asked only for a substitute with the same
+`NarHash`.

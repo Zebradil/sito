@@ -1,5 +1,8 @@
 # Upstreams form ordered tiers; v1 implements sequential selection only
 
+The NAR affinity below is now carried in the NAR URL rather than an in-memory
+map, with a `NarHash`-matched fallback; see ADR-0009.
+
 A flat ranked list cannot express the intended policies ("race my own caches in
 parallel, fall back to cache.nixos.org only on miss"), and retrofitting grouping
 into a flat schema is a breaking config change. So the config schema is tiered

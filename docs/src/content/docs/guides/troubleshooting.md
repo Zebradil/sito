@@ -58,6 +58,7 @@ These warnings appear at the default level:
 | `narinfo body read failed` | The narinfo headers arrived but the body did not. Treated like `upstream failed`. |
 | `NAR upstream read failed` | A NAR body broke off or sent nothing for 60 s. The upstream is marked down. Before the first byte, sito tries the next upstream; after it, Nix gets a short body and fails that download. |
 | `slow NAR transfer` | A NAR completed but took 30 s or more at under 1 MB/s. Logged in place of `NAR transfer done`. |
+| `NAR decode failed` | A NAR did not decompress as its narinfo's `Compression` said. Before the first byte, sito tries the next upstream; after it, Nix gets a short body and fails that download. The upstream is not marked down. |
 | `all NAR slots busy, waiting` | A NAR request waited 5 s for a `max-inflight` slot. `scope` names the cap: `global`, or the URL of an upstream with its own. |
 | `Error: listener failed` | The listener could not accept a connection, most often because sito ran out of file descriptors. The listener is gone after one failure, so sito exits and launchd or systemd restarts it. |
 
@@ -74,7 +75,6 @@ Every number is in memory since the process started; a restart resets them all.
 | Field | Meaning |
 | --- | --- |
 | `uptime_secs` | Seconds since sito started. |
-| `affinity_entries` | NAR paths remembered with the upstream whose narinfo named them. Cleared whenever it reaches 4096, so it rises and drops. |
 | `nar_slots` | `used`: NAR transfers in flight; `max`: the `max-inflight` cap. |
 | `upstream_nar_slots` | Per upstream, in `upstreams[]` order: `used` and `max` of its own `max-inflight`, or `null` where it sets none. |
 | `upstreams[]` | One entry per upstream, in config order: the first tier's upstreams, then the second's. |
@@ -93,7 +93,7 @@ Per upstream:
 | `hits` | Requests this upstream answered, narinfo and NAR alike. |
 | `misses` | 404s: the upstream does not have the path. Routine for a small cache in front of a big one. |
 | `errors` | Failed requests, including NAR bodies that broke off. Each also sets `healthy` to `false` and starts a probe pass at once. |
-| `nar_bytes` | NAR body bytes passed to clients, including transfers that broke off. |
+| `nar_bytes` | NAR body bytes received from this upstream, before decompression, including transfers that broke off. |
 
 The moving averages weigh the newest sample at 0.3, so a handful of requests is enough to reflect a network change.
 
@@ -123,6 +123,24 @@ credentials, so authenticated caches are not supported yet
 **Everything 404s.** Compare `misses` and `errors`. Rising `misses`: sito reaches the upstreams and they do not have the
 paths; Nix builds locally. Rising `errors`: connectivity. With every upstream `healthy: false`, sito answers 404 without
 asking anyone, except that a NAR is still tried at the upstream whose narinfo named it.
+
+**Nix warns `file 'nar/…' does not exist in binary cache 'http://127.0.0.1:5001'`.** sito answered 404 for a NAR whose
+narinfo Nix had cached, and Nix moved on to its next substituter or built the path. With a NAR URL under
+`nar/sito/v1/`, neither the upstream that served the narinfo nor any other upstream could serve a NAR with the same
+`NarHash`: the path was built only there, and that upstream is unreachable. With any other NAR URL, Nix cached the
+narinfo before sito 0.7.0, which started rewriting narinfo URLs, so sito can only try that exact path on each
+upstream. Such entries expire after `narinfo-cache-positive-ttl`, 30 days by default. To drop them at once, delete
+Nix's cached narinfos for sito, in the daemon's cache and in your own:
+
+```sh
+q="DELETE FROM NARs WHERE cache IN (SELECT id FROM BinaryCaches WHERE url = 'http://127.0.0.1:5001')"
+sudo find /root/.cache/nix /var/root/.cache/nix -maxdepth 1 -name 'binary-cache-*.sqlite' -exec sqlite3 {} "$q" \;
+find ~/.cache/nix -maxdepth 1 -name 'binary-cache-*.sqlite' -exec sqlite3 {} "$q" \;
+```
+
+Use your substituter URL for sito in `q`. Only one of `/root` (NixOS) and `/var/root` (macOS) exists, so `find` reports
+the other missing. Run the last line without `sudo`, so the cache stays owned by you. `sqlite3` ships with macOS; on
+NixOS, get it with `nix shell nixpkgs#sqlite`. Nix fetches the narinfos again on next use, now rewritten.
 
 **Nix reports a signature error.** sito does not touch signatures. Nix does not trust the key the upstream signs with:
 add it to that upstream's `public-keys` (with `manageSubstituters` on) or to `trusted-public-keys`, then rebuild.

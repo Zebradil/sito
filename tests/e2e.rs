@@ -11,6 +11,15 @@ const NAR_BYTES: &[u8] = b"not really a nar, but bytes are bytes";
 
 /// Mock upstream: serves /nix-cache-info, plus the given (path, body) pairs.
 fn mock_upstream(routes: Vec<(&'static str, &'static [u8])>) -> String {
+    mock_upstream_owned(
+        routes
+            .into_iter()
+            .map(|(p, b)| (p.to_string(), b.to_vec()))
+            .collect(),
+    )
+}
+
+fn mock_upstream_owned(routes: Vec<(String, Vec<u8>)>) -> String {
     let server = Server::http("127.0.0.1:0").unwrap();
     let port = server.server_addr().to_ip().unwrap().port();
     std::thread::spawn(move || {
@@ -122,27 +131,191 @@ fn dead_upstream_is_survived() {
     assert_eq!(body, NARINFO.as_bytes());
 }
 
+/// A store path's hash part, as a narinfo request path names it.
+const STORE_HASH: &str = "1rxb1dhql5jg8mg2k3wlq813a4gjlvk4";
+
+/// A narinfo for [`STORE_HASH`] pointing at `url`, as an upstream would
+/// serve it.
+fn narinfo(url: &str, compression: &str, nar_hash: &str) -> Vec<u8> {
+    format!(
+        "StorePath: /nix/store/{STORE_HASH}-hello-1\n\
+         URL: {url}\n\
+         Compression: {compression}\n\
+         FileHash: sha256:0000\n\
+         FileSize: 1\n\
+         NarHash: {nar_hash}\n\
+         NarSize: {}\n\
+         References: \n\
+         Sig: cache-1:c2ln\n",
+        NAR_BYTES.len()
+    )
+    .into_bytes()
+}
+
+fn xz(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    liblzma::read::XzEncoder::new(bytes, 6)
+        .read_to_end(&mut out)
+        .unwrap();
+    out
+}
+
+fn zstd(bytes: &[u8]) -> Vec<u8> {
+    zstd::encode_all(bytes, 3).unwrap()
+}
+
+/// Fetch the narinfo through sito and return its `URL:` field.
+fn nar_url_via(base: &str) -> String {
+    let (code, body) = get(&format!("{base}/{STORE_HASH}.narinfo")).unwrap();
+    assert_eq!(code, 200);
+    let text = String::from_utf8(body).unwrap();
+    text.lines()
+        .find_map(|l| l.strip_prefix("URL: "))
+        .unwrap()
+        .to_string()
+}
+
 #[test]
-fn nar_affinity_prefers_the_upstream_that_served_the_narinfo() {
-    // Both upstreams have the narinfo, only the second has the NAR. After
-    // sito serves the narinfo from the *second* (first one 404s narinfo), the
-    // NAR request must follow affinity straight to it.
-    let a = mock_upstream(vec![]);
-    let b = mock_upstream(vec![
-        ("/abc.narinfo", NARINFO.as_bytes()),
-        ("/nar/deadbeef.nar.xz", NAR_BYTES),
+fn narinfo_is_rewritten_and_nar_served_decompressed() {
+    let up = mock_upstream_owned(vec![
+        (
+            format!("/{STORE_HASH}.narinfo"),
+            narinfo("nar/abc.nar.xz", "xz", "sha256:1aaa"),
+        ),
+        ("/nar/abc.nar.xz".into(), xz(NAR_BYTES)),
+    ]);
+    let base = sito_at(&[up]);
+
+    let (_, body) = get(&format!("{base}/{STORE_HASH}.narinfo")).unwrap();
+    let text = String::from_utf8(body).unwrap();
+    let url = format!(
+        "nar/sito/v1/{}/{STORE_HASH}/sha256:1aaa/xz/nar/abc.nar.xz",
+        sito::narinfo::upstream_key(&sito_upstream(&base, 0))
+    );
+    assert!(text.contains(&format!("\nURL: {url}\n")), "{text}");
+    assert!(text.contains("\nCompression: none\n"), "{text}");
+    assert!(
+        !text.contains("FileHash") && !text.contains("FileSize"),
+        "{text}"
+    );
+    assert!(text.contains("\nSig: cache-1:c2ln\n"), "{text}");
+
+    let (code, body) = get(&format!("{base}/{url}")).unwrap();
+    assert_eq!(code, 200);
+    assert_eq!(body, NAR_BYTES);
+}
+
+/// The URL of upstream `idx` as sito reports it.
+fn sito_upstream(base: &str, idx: usize) -> String {
+    status_of(base)["upstreams"][idx]["url"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+#[test]
+fn nar_falls_back_to_an_upstream_with_the_same_nar_hash() {
+    // `a` served the narinfo but has since lost the NAR; `b` holds the same
+    // NAR under its own path and compression.
+    let a = mock_upstream_owned(vec![(
+        format!("/{STORE_HASH}.narinfo"),
+        narinfo("nar/abc.nar?hash=x", "none", "sha256:1aaa"),
+    )]);
+    let b = mock_upstream_owned(vec![
+        (
+            format!("/{STORE_HASH}.narinfo"),
+            narinfo("nar/other.nar.zst", "zstd", "sha256:1aaa"),
+        ),
+        ("/nar/other.nar.zst".into(), zstd(NAR_BYTES)),
     ]);
     let base = sito_at(&[a, b.clone()]);
 
-    let resp = ureq::get(&format!("{base}/abc.narinfo")).call().unwrap();
+    let url = nar_url_via(&base);
+    let resp = ureq::get(&format!("{base}/{url}")).call().unwrap();
     assert_eq!(resp.headers()["X-Sito-Upstream"], b.as_str());
-    let (code, body) = get(&format!("{base}/nar/deadbeef.nar.xz")).unwrap();
+    let mut body = Vec::new();
+    resp.into_body()
+        .into_reader()
+        .read_to_end(&mut body)
+        .unwrap();
+    assert_eq!(body, NAR_BYTES);
+}
+
+#[test]
+fn nar_falls_back_when_its_upstream_is_gone() {
+    // The upstream that served the narinfo is not configured any more, as
+    // after a URL change, or is unreachable: either way another upstream
+    // with the same NarHash serves the NAR.
+    let dead = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        format!("http://127.0.0.1:{}", l.local_addr().unwrap().port())
+    };
+    let b = mock_upstream_owned(vec![
+        (
+            format!("/{STORE_HASH}.narinfo"),
+            narinfo("nar/b.nar.xz", "xz", "sha256:1aaa"),
+        ),
+        ("/nar/b.nar.xz".into(), xz(NAR_BYTES)),
+    ]);
+    let base = sito_at(&[dead.clone(), b]);
+
+    for key in [
+        sito::narinfo::upstream_key(&dead),
+        "0000000000000000".into(),
+    ] {
+        let url = format!("nar/sito/v1/{key}/{STORE_HASH}/sha256:1aaa/none/nar/a.nar");
+        let (code, body) = get(&format!("{base}/{url}")).unwrap();
+        assert_eq!(code, 200, "{key}");
+        assert_eq!(body, NAR_BYTES, "{key}");
+    }
+}
+
+#[test]
+fn different_nar_hash_is_never_substituted() {
+    let a = mock_upstream_owned(vec![(
+        format!("/{STORE_HASH}.narinfo"),
+        narinfo("nar/a.nar", "none", "sha256:1aaa"),
+    )]);
+    let b = mock_upstream_owned(vec![
+        (
+            format!("/{STORE_HASH}.narinfo"),
+            narinfo("nar/b.nar", "none", "sha256:1bbb"),
+        ),
+        ("/nar/b.nar".into(), b"a different build".to_vec()),
+    ]);
+    let base = sito_at(&[a, b]);
+
+    let url = nar_url_via(&base);
+    match get(&format!("{base}/{url}")) {
+        Err(ureq::Error::StatusCode(404)) => {}
+        other => panic!("expected 404, got {other:?}"),
+    }
+}
+
+#[test]
+fn corrupt_compressed_nar_ends_the_body() {
+    // Garbage where xz was promised: the client gets no bytes it could take
+    // for a NAR, and the next upstream gets its turn.
+    let a = mock_upstream_owned(vec![
+        (
+            format!("/{STORE_HASH}.narinfo"),
+            narinfo("nar/a.nar.xz", "xz", "sha256:1aaa"),
+        ),
+        ("/nar/a.nar.xz".into(), b"not xz at all".to_vec()),
+    ]);
+    let b = mock_upstream_owned(vec![
+        (
+            format!("/{STORE_HASH}.narinfo"),
+            narinfo("nar/b.nar", "none", "sha256:1aaa"),
+        ),
+        ("/nar/b.nar".into(), NAR_BYTES.to_vec()),
+    ]);
+    let base = sito_at(&[a, b]);
+
+    let url = nar_url_via(&base);
+    let (code, body) = get(&format!("{base}/{url}")).unwrap();
     assert_eq!(code, 200);
     assert_eq!(body, NAR_BYTES);
-
-    let (_, status) = get(&format!("{base}/status")).unwrap();
-    let status: serde_json::Value = serde_json::from_slice(&status).unwrap();
-    assert_eq!(status["affinity_entries"], 1);
 }
 
 #[test]
@@ -173,7 +346,8 @@ fn metrics_expose_traffic_in_prometheus_text_format() {
     };
     for line in [
         nar_done.clone(),
-        format!("sito_upstream_requests_total{{url=\"{empty}\",tier=\"0\",result=\"miss\"}} 1"),
+        // The NAR path is not a rewritten one, so it walks the tiers too.
+        format!("sito_upstream_requests_total{{url=\"{empty}\",tier=\"0\",result=\"miss\"}} 2"),
         format!("sito_upstream_requests_total{{url=\"{full}\",tier=\"1\",result=\"hit\"}} 2"),
         format!("sito_upstream_narinfo_seconds_count{{url=\"{full}\",tier=\"1\"}} 1"),
         format!(
@@ -262,14 +436,15 @@ fn failed_affinity_upstream_is_retried_before_404() {
     let flaky = format!("http://{}", listener.local_addr().unwrap());
     std::thread::spawn(move || {
         let mut nar_requests = 0;
+        let info = narinfo("nar/abc.nar", "none", "sha256:1aaa");
         for mut conn in listener.incoming().flatten() {
             let mut buf = [0; 4096];
             let n = conn.read(&mut buf).unwrap_or(0);
             let line = String::from_utf8_lossy(&buf[..n]).to_string();
             let body: &[u8] = if line.starts_with("GET /nix-cache-info ") {
                 b"StoreDir: /nix/store\n"
-            } else if line.starts_with("GET /abc.narinfo ") {
-                NARINFO.as_bytes()
+            } else if line.starts_with(&format!("GET /{STORE_HASH}.narinfo ")) {
+                &info
             } else {
                 nar_requests += 1;
                 if nar_requests == 1 {
@@ -288,12 +463,13 @@ fn failed_affinity_upstream_is_retried_before_404() {
     let empty = mock_upstream(vec![]);
     let base = sito_at(&[flaky, empty]);
 
-    get(&format!("{base}/abc.narinfo")).unwrap();
-    let (code, body) = get(&format!("{base}/nar/deadbeef.nar.xz")).unwrap();
+    let url = nar_url_via(&base);
+    let (code, body) = get(&format!("{base}/{url}")).unwrap();
     assert_eq!(code, 200);
     assert_eq!(body, NAR_BYTES);
     let status = status_of(&base);
     assert_eq!(status["upstreams"][0]["errors"], 1);
+    // Asked for a substitute narinfo, which it does not have.
     assert_eq!(status["upstreams"][1]["misses"], 1);
 }
 
