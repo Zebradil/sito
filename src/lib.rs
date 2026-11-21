@@ -106,6 +106,8 @@ pub fn build(cfg: &config::Config) -> Result<(Arc<App>, Server)> {
             .flat_map(|t| &t.upstreams)
             .map(|u| u.max_inflight.map(|max| proxy::Slots::new(max, &u.url)))
             .collect(),
+        nar_fallbacks_served: Default::default(),
+        nar_fallbacks_failed: Default::default(),
     });
     let server =
         Server::http(&cfg.listen).map_err(|e| anyhow::anyhow!("bind {}: {e}", cfg.listen))?;

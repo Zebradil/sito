@@ -239,6 +239,9 @@ fn nar_falls_back_to_an_upstream_with_the_same_nar_hash() {
         .read_to_end(&mut body)
         .unwrap();
     assert_eq!(body, NAR_BYTES);
+    let fallbacks = &status_of(&base)["nar_fallbacks"];
+    assert_eq!(fallbacks["served"], 1);
+    assert_eq!(fallbacks["failed"], 0);
 }
 
 #[test]
@@ -290,6 +293,9 @@ fn different_nar_hash_is_never_substituted() {
         Err(ureq::Error::StatusCode(404)) => {}
         other => panic!("expected 404, got {other:?}"),
     }
+    let fallbacks = &status_of(&base)["nar_fallbacks"];
+    assert_eq!(fallbacks["served"], 0);
+    assert_eq!(fallbacks["failed"], 1);
 }
 
 #[test]
@@ -357,6 +363,9 @@ fn metrics_expose_traffic_in_prometheus_text_format() {
         "# TYPE sito_upstream_narinfo_seconds histogram".into(),
         format!("sito_upstream_narinfo_seconds_bucket{{url=\"{full}\",tier=\"1\",le=\"+Inf\"}} 1"),
         format!("sito_upstream_nar_bytes_per_second_count{{url=\"{empty}\",tier=\"0\"}} 0"),
+        "# TYPE sito_nar_fallbacks_total counter".into(),
+        "sito_nar_fallbacks_total{result=\"served\"} 0".into(),
+        "sito_nar_fallbacks_total{result=\"failed\"} 0".into(),
     ] {
         assert!(
             text.lines().any(|l| l == line),

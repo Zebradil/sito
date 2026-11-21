@@ -651,6 +651,85 @@
       "description": "Narinfo and NAR answers per upstream. Errors are upstream failures other than a 404: refused connections, timeouts, error statuses and NAR transfers that broke off. Misses (404) are in the hit ratio below."
     },
     {
+      "type": "timeseries",
+      "title": "NAR fallbacks",
+      "id": 24,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (result) (increase(sito_nar_fallbacks_total{host=~\"$host\"}[$__rate_interval]))",
+          "legendFormat": "{{result}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60
+          },
+          "decimals": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "served"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "failed"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "NARs whose own upstream, the one that served their narinfo, did not serve them. Served: another upstream with the same NarHash stood in. Failed: none could, so Nix built the path or tried its next substituter. Both rise while an upstream that served narinfos is unreachable, such as one behind a VPN. Not filtered by upstream."
+    },
+    {
       "type": "row",
       "title": "Over the selected range",
       "id": 13,
@@ -659,7 +738,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 32
+        "y": 38
       },
       "panels": []
     },
@@ -675,7 +754,7 @@
         "h": 8,
         "w": 6,
         "x": 0,
-        "y": 33
+        "y": 39
       },
       "targets": [
         {
@@ -729,7 +808,7 @@
         "h": 8,
         "w": 6,
         "x": 6,
-        "y": 33
+        "y": 39
       },
       "targets": [
         {
@@ -785,7 +864,7 @@
         "h": 8,
         "w": 6,
         "x": 12,
-        "y": 33
+        "y": 39
       },
       "targets": [
         {
@@ -841,7 +920,7 @@
         "h": 8,
         "w": 6,
         "x": 18,
-        "y": 33
+        "y": 39
       },
       "targets": [
         {
@@ -893,7 +972,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 41
+        "y": 47
       },
       "panels": []
     },
@@ -909,7 +988,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 42
+        "y": 48
       },
       "targets": [
         {
@@ -955,7 +1034,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 42
+        "y": 48
       },
       "targets": [
         {
@@ -1001,7 +1080,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 42
+        "y": 48
       },
       "targets": [
         {
@@ -1047,7 +1126,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 50
+        "y": 56
       },
       "targets": [
         {
@@ -1103,7 +1182,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 50
+        "y": 56
       },
       "targets": [
         {
