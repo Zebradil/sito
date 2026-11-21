@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.0](https://github.com/Zebradil/sito/compare/v0.7.0...v0.8.0) (2026-11-21)
+
+
+### Features
+
+* **metrics:** count NAR fallbacks and describe every dashboard panel ([#74](https://github.com/Zebradil/sito/issues/74)) ([6d281e5](https://github.com/Zebradil/sito/commit/6d281e5f6b035abbc2af076408c15d58e4d2d006))
+
+
+### Fixes
+
+* **proxy:** charge connect and header time to NAR throughput again ([#75](https://github.com/Zebradil/sito/issues/75)) ([fe9db2f](https://github.com/Zebradil/sito/commit/fe9db2f01bbc6f8396994d741ceb6cdf7e64f588))
+
 ## [0.7.0](https://github.com/Zebradil/sito/compare/v0.6.1...v0.7.0) (2026-11-21)
 
 
