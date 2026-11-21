@@ -77,6 +77,7 @@ Every number is in memory since the process started; a restart resets them all.
 | `uptime_secs` | Seconds since sito started. |
 | `nar_slots` | `used`: NAR transfers in flight; `max`: the `max-inflight` cap. |
 | `upstream_nar_slots` | Per upstream, in `upstreams[]` order: `used` and `max` of its own `max-inflight`, or `null` where it sets none. |
+| `nar_fallbacks` | NAR requests at a rewritten URL that the upstream it names did not serve. `served`: another upstream with the same `NarHash` did; `failed`: none could, and Nix got a 404. |
 | `upstreams[]` | One entry per upstream, in config order: the first tier's upstreams, then the second's. |
 
 Per upstream:

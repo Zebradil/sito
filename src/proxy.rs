@@ -4,6 +4,7 @@
 
 use std::io::Read;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use anyhow::{Context, Result};
@@ -41,6 +42,11 @@ pub struct App {
     /// Per-upstream NAR caps (an upstream's own `max-inflight`), by flat
     /// upstream index; `None` where the upstream sets none.
     pub(crate) upstream_slots: Vec<Option<Slots>>,
+    /// Rewritten-URL NAR requests their own upstream did not serve
+    /// (ADR-0009), served by another upstream with the same `NarHash`.
+    pub(crate) nar_fallbacks_served: AtomicU64,
+    /// The same, answered 404 because no upstream could serve them.
+    pub(crate) nar_fallbacks_failed: AtomicU64,
 }
 
 /// Static tier shape from config: which upstream indices belong to which
@@ -122,6 +128,10 @@ fn status(app: &App, req: Request) {
         "upstream_nar_slots": app.upstream_slots.iter().map(|s| s.as_ref().map(|s| {
             serde_json::json!({"used": s.used(), "max": s.max})
         })).collect::<Vec<_>>(),
+        "nar_fallbacks": {
+            "served": app.nar_fallbacks_served.load(Ordering::Relaxed),
+            "failed": app.nar_fallbacks_failed.load(Ordering::Relaxed),
+        },
         "upstreams": app.registry.snapshot(),
     });
     let mut resp = Response::from_string(body.to_string());
@@ -160,6 +170,22 @@ fn metrics(app: &App, req: Request) {
         "sito_nar_slots_max",
         "The max-inflight cap on NAR transfers.",
         app.nar_slots.max as f64,
+    );
+    family(
+        &mut out,
+        "sito_nar_fallbacks_total",
+        "counter",
+        "Rewritten NAR requests their own upstream did not serve, by result: served by another upstream with the same NarHash, or failed (404).",
+        [
+            ("served", &app.nar_fallbacks_served),
+            ("failed", &app.nar_fallbacks_failed),
+        ]
+        .map(|(result, n)| {
+            (
+                format!("{{result=\"{result}\"}}"),
+                n.load(Ordering::Relaxed) as f64,
+            )
+        }),
     );
 
     let labels = |u: &UpstreamSnapshot| format!("url=\"{}\",tier=\"{}\"", escape(&u.url), u.tier);
@@ -346,7 +372,15 @@ fn forward(app: &App, req: Request, kind: RequestKind) {
     let mut affinity_failed = None;
     for idx in attempts {
         match try_one(idx) {
-            Attempt::Hit(resp) => return respond(req, resp),
+            Attempt::Hit(resp) => {
+                if target
+                    .as_ref()
+                    .is_some_and(|t| app.upstream_keys[idx] != t.upstream_key)
+                {
+                    app.nar_fallbacks_served.fetch_add(1, Ordering::Relaxed);
+                }
+                return respond(req, resp);
+            }
             Attempt::Failed if input.affinity == Some(idx) => affinity_failed = Some(idx),
             Attempt::Miss | Attempt::Failed => {}
         }
@@ -360,6 +394,9 @@ fn forward(app: &App, req: Request, kind: RequestKind) {
                 Attempt::Failed => {}
             }
         }
+    }
+    if target.is_some() {
+        app.nar_fallbacks_failed.fetch_add(1, Ordering::Relaxed);
     }
     respond(req, text(404, "no upstream has this path"));
 }

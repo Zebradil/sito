@@ -141,6 +141,7 @@ shape.
 | --- | --- | --- |
 | `sito_uptime_seconds` | gauge | Seconds since sito started. |
 | `sito_nar_slots_used`, `sito_nar_slots_max` | gauge | As `nar_slots` in `/status`. |
+| `sito_nar_fallbacks_total` | counter | As `nar_fallbacks` in `/status`, by `result`: `served` or `failed`. |
 | `sito_upstream_healthy` | gauge | `1` or `0`; absent until the first probe answers. |
 | `sito_upstream_requests_total` | counter | Requests per upstream, by `result`: `hit`, `miss` or `error`. |
 | `sito_upstream_narinfo_seconds` | histogram | Narinfo latency, request to response headers. Buckets from 10 ms to 2.5 s. |
@@ -205,7 +206,7 @@ sum by (url) (increase(sito_upstream_nar_bytes_per_second_bucket{le="2000000"}[1
   / sum by (url) (increase(sito_upstream_nar_bytes_per_second_count[1h]))
 ```
 
-**Bytes served per upstream**, and the download rate while a build runs:
+**Bytes downloaded per upstream**, before decompression, and the download rate while a build runs:
 
 ```promql
 sum by (url) (increase(sito_upstream_nar_bytes_total[1h]))
@@ -223,6 +224,13 @@ sum by (url) (increase(sito_upstream_requests_total{result="hit"}[1h]))
 
 ```promql
 sum by (url) (increase(sito_upstream_requests_total{result="error"}[1h]))
+```
+
+**NAR fallbacks.** NARs whose own upstream did not serve them, by whether another upstream with the same `NarHash`
+stood in (`served`) or none could (`failed`):
+
+```promql
+sum by (result) (increase(sito_nar_fallbacks_total[1h]))
 ```
 
 ## Logs for single downloads
