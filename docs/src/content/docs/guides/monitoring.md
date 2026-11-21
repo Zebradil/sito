@@ -205,7 +205,7 @@ sum by (url) (increase(sito_upstream_nar_bytes_per_second_bucket{le="2000000"}[1
   / sum by (url) (increase(sito_upstream_nar_bytes_per_second_count[1h]))
 ```
 
-**Bytes served per upstream**, and the download rate while a build runs:
+**Bytes downloaded per upstream**, before decompression, and the download rate while a build runs:
 
 ```promql
 sum by (url) (increase(sito_upstream_nar_bytes_total[1h]))

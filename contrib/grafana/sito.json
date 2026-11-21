@@ -182,7 +182,8 @@
         "colorMode": "none",
         "graphMode": "none",
         "textMode": "value_and_name"
-      }
+      },
+      "description": "Time since sito last started. Short means a recent restart; the Uptime timeline at the bottom shows when."
     },
     {
       "type": "stat",
@@ -236,7 +237,7 @@
         "graphMode": "none",
         "textMode": "value_and_name"
       },
-      "description": "NAR transfers in flight, out of max-inflight."
+      "description": "NAR transfers in flight, out of the global max-inflight. A NAR request waits for a free slot, so used at max means downloads are queuing."
     },
     {
       "type": "stat",
@@ -295,7 +296,7 @@
         "graphMode": "none",
         "textMode": "value_and_name"
       },
-      "description": "Last probe or request result per upstream. Absent until the first probe answers."
+      "description": "Last verdict per upstream: up after a probe answers, down after a failed probe or an upstream error on real traffic. A 404 never marks an upstream down. Absent until the first probe answers."
     },
     {
       "type": "state-timeline",
@@ -438,7 +439,8 @@
           "showLegend": false
         }
       },
-      "interval": "1m"
+      "interval": "1m",
+      "description": "Each upstream's health over time. A down stretch starts with a failed probe or an upstream error and ends when a probe answers again, at most one probe interval (15 s by default) after the upstream is back."
     },
     {
       "type": "row",
@@ -497,7 +499,7 @@
           "sort": "desc"
         }
       },
-      "description": "Lookups are most of what a build waits on. Empty where an upstream answered no narinfo."
+      "description": "Time from request to response headers for served narinfos. Lookups are most of what a build waits on. A 404 is not timed, so the panel is empty where an upstream served no narinfo. Buckets top out at 2.5 s; anything slower reads as 2.5 s."
     },
     {
       "type": "timeseries",
@@ -543,7 +545,7 @@
           "sort": "desc"
         }
       },
-      "description": "Per completed NAR transfer. Buckets top out at 100 MB/s."
+      "description": "Per completed NAR transfer: bytes received from the upstream, before decompression, over the time the body took. Small NARs read slow, since latency dominates a short transfer. Buckets top out at 100 MB/s; anything faster reads as 100 MB/s."
     },
     {
       "type": "timeseries",
@@ -589,7 +591,7 @@
           "sort": "desc"
         }
       },
-      "description": "NAR body bytes passed to clients, per second."
+      "description": "NAR bytes received from each upstream per second, before decompression, including transfers that broke off. Nix receives more, since sito hands it every NAR decompressed."
     },
     {
       "type": "timeseries",
@@ -646,7 +648,7 @@
           "sort": "desc"
         }
       },
-      "description": "Hits and errors per upstream. Misses are in the hit ratio below."
+      "description": "Narinfo and NAR answers per upstream. Errors are upstream failures other than a 404: refused connections, timeouts, error statuses and NAR transfers that broke off. Misses (404) are in the hit ratio below."
     },
     {
       "type": "row",
@@ -663,7 +665,7 @@
     },
     {
       "type": "bargauge",
-      "title": "Bytes served",
+      "title": "Bytes downloaded",
       "id": 14,
       "datasource": {
         "type": "prometheus",
@@ -712,7 +714,8 @@
           "titleSize": 14,
           "valueSize": 18
         }
-      }
+      },
+      "description": "NAR bytes received from each upstream over the selected range, before decompression: which upstreams carried the downloads."
     },
     {
       "type": "bargauge",
@@ -768,7 +771,7 @@
           "valueSize": 18
         }
       },
-      "description": "A cache that mostly misses still costs a round trip for every path in its tier."
+      "description": "Hits over hits plus misses, narinfos and NARs together; errors are left out. A cache that mostly misses still costs a round trip for every path in its tier."
     },
     {
       "type": "bargauge",
@@ -824,7 +827,7 @@
           "valueSize": 18
         }
       },
-      "description": "Share of completed NAR transfers slower than 2 MB/s."
+      "description": "Share of completed NAR transfers slower than 2 MB/s, measured before decompression. Small NARs count as slow more often, since latency dominates a short transfer."
     },
     {
       "type": "bargauge",
@@ -878,7 +881,8 @@
           "titleSize": 14,
           "valueSize": 18
         }
-      }
+      },
+      "description": "Upstream failures other than a 404 over the selected range: refused connections, timeouts, error statuses and NAR transfers that broke off. Each one marks the upstream down until a probe answers."
     },
     {
       "type": "row",
@@ -937,7 +941,7 @@
           "sort": "desc"
         }
       },
-      "description": "Moving average of the probe round trip, as ranked on."
+      "description": "Moving average of the probe round trip, as ranked on. A failed probe leaves it at its last value, so a down upstream keeps its old number."
     },
     {
       "type": "timeseries",
@@ -983,7 +987,7 @@
           "sort": "desc"
         }
       },
-      "description": "Moving average of narinfo latency, as ranked on."
+      "description": "Moving average of narinfo latency on served narinfos, as ranked on. It is sampled at scrape time and says little about a single short build; use the p95 panel for that."
     },
     {
       "type": "timeseries",
@@ -1029,7 +1033,7 @@
           "sort": "desc"
         }
       },
-      "description": "Moving average of completed NAR transfer throughput."
+      "description": "Moving average of completed NAR transfer throughput, before decompression, as ranked on. Sampled at scrape time, like the other moving averages."
     },
     {
       "type": "timeseries",
@@ -1084,7 +1088,8 @@
           "mode": "multi",
           "sort": "desc"
         }
-      }
+      },
+      "description": "NAR transfers in flight against the global max-inflight over time. Long stretches at max mean downloads queued for a slot; raise max-inflight if the link has room."
     },
     {
       "type": "timeseries",
