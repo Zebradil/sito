@@ -545,7 +545,7 @@
           "sort": "desc"
         }
       },
-      "description": "Per completed NAR transfer: bytes received from the upstream, before decompression, over the time the body took. Small NARs read slow, since latency dominates a short transfer. Buckets top out at 100 MB/s; anything faster reads as 100 MB/s."
+      "description": "Per completed NAR transfer: bytes received from the upstream, before decompression, over the time from request to last byte. Connect and header latency count, so small NARs read slow. Buckets top out at 100 MB/s; anything faster reads as 100 MB/s."
     },
     {
       "type": "timeseries",
