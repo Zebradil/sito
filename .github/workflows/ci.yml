@@ -1,8 +1,10 @@
 name: CI
 
-# Every run that can read the cache secrets publishes: main and same-repo pull
-# requests alike, so a pull request's build is a cache hit on main after the
-# merge. Fork pull requests get no secrets and build without publishing.
+# Hosted legs publish from every run that can read the cache secrets: main and
+# same-repo pull requests alike, so a pull request's build is a cache hit on
+# main after the merge. Fork pull requests get no secrets and build without
+# publishing. The homelab leg publishes from main only; its pull request builds
+# still stay warm in daddy's store, which the main run then reuses.
 # nix-ci's build action follows each push with the kasha manifest that keeps
 # it alive through kasha's GC.
 
@@ -19,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: zebradil/nix-ci/.github/actions/setup-nix@4051cac72e577a0903ecbcee2ffedb4e9f6ac9f1 # v3.1.0
+      - uses: zebradil/nix-ci/.github/actions/setup-nix@a5b2fc6d96564331945420d60cd884aa71f47277 # v3.2.0
         with:
           # Binary cache, read side. Plain public HTTPS reads, so this works
           # for fork pull requests too — `vars` are exposed to them, unlike
@@ -39,25 +41,51 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Homelab runner pod: builds in daddy's store (nix-ci reads the pod's NIX_CI_STORE).
+          # Fork pull requests stay on a hosted runner. That is routing, not a boundary: a fork
+          # can edit this file, so the gate is the approval requirement for outside contributors.
           - system: x86_64-linux
-            runner: ubuntu-latest
+            runner: >-
+              ${{ github.event.pull_request.head.repo.full_name != github.repository
+                  && github.event_name == 'pull_request' && 'ubuntu-latest' || 'homelab' }}
+            box: true
           - system: aarch64-darwin
             runner: macos-26
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: zebradil/nix-ci/.github/actions/setup-nix@4051cac72e577a0903ecbcee2ffedb4e9f6ac9f1 # v3.1.0
+      # Where this leg publishes, or nothing. The homelab leg pushes to the kasha box on the LAN
+      # (it mirrors up to R2) from `push` events only, so its pull request runs publish nothing
+      # and never see the box token. Hosted legs push to R2 whenever the AWS secrets are
+      # readable, which a fork pull request's are not.
+      - name: Pick cache
+        id: cache
+        env:
+          BOX: ${{ matrix.box || '' }}
+          EVENT: ${{ github.event_name }}
+          HAS_AWS: ${{ secrets.AWS_ACCESS_KEY_ID != '' }}
+          BOX_URL: ${{ vars.KASHA_BOX_URL }}
+          S3_URL: ${{ vars.CACHE_S3_URL }}
+        run: |
+          if [[ -n "$BOX" ]]; then
+            if [[ "$EVENT" == push ]]; then
+              echo "url=$BOX_URL" >> "$GITHUB_OUTPUT"
+            fi
+          elif [[ "$HAS_AWS" == true ]]; then
+            echo "url=$S3_URL" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: zebradil/nix-ci/.github/actions/setup-nix@a5b2fc6d96564331945420d60cd884aa71f47277 # v3.2.0
         with:
           extra-substituters: ${{ vars.NIX_CACHE_URL }}
           extra-trusted-public-keys: ${{ vars.NIX_CACHE_PUBLIC_KEY }}
-          signing-key: ${{ secrets.CACHE_SIGNING_KEY }}
+          signing-key: ${{ steps.cache.outputs.url && secrets.CACHE_SIGNING_KEY || '' }}
 
-      - uses: zebradil/nix-ci/.github/actions/build@4051cac72e577a0903ecbcee2ffedb4e9f6ac9f1 # v3.1.0
+      - uses: zebradil/nix-ci/.github/actions/build@a5b2fc6d96564331945420d60cd884aa71f47277 # v3.2.0
         with:
           attr: checks.${{ matrix.system }}
-          # Empty without the AWS secrets, so a fork pull request builds without
-          # attempting a push it has no credentials for.
-          cache-s3-url: ${{ secrets.AWS_ACCESS_KEY_ID != '' && vars.CACHE_S3_URL || '' }}
+          cache-s3-url: ${{ steps.cache.outputs.url }}
+          cache-token: ${{ steps.cache.outputs.url && matrix.box && secrets.KASHA_BOX_TOKEN || '' }}
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           # The retention group sito's main generations are filed under. A new
